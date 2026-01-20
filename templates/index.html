@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Панель управления чат-ботами</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Панель управления чат-ботами</h1>
+            <div>
+                <a href="/flow-editor" class="btn btn-info me-2">🎨 Редактор диалогов</a>
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createBotModal">
+                    + Создать бота
+                </button>
+            </div>
+        </div>
+
+        <div class="row" id="botsList">
+        </div>
+    </div>
+
+    <!-- Модальное окно создания бота -->
+    <div class="modal fade" id="createBotModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Создать нового бота</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createBotForm">
+                        <div class="mb-3">
+                            <label class="form-label">Название бота</label>
+                            <input type="text" class="form-control" id="botName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Токен</label>
+                            <input type="text" class="form-control" id="botToken" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Base URL</label>
+                            <input type="text" class="form-control" id="botBaseUrl" value="https://platform-api.max.ru">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Стартовое сообщение</label>
+                            <textarea class="form-control" id="botStartMessage" rows="4"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Меню (JSON формат)</label>
+                            <textarea class="form-control" id="botMenuConfig" rows="6" placeholder='[
+    [{"type": "callback", "text": "Кнопка 1", "payload": "action1"}],
+    [{"type": "callback", "text": "Кнопка 2", "payload": "action2"}]
+]'></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" onclick="createBot()">Создать</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно редактирования бота -->
+    <div class="modal fade" id="editBotModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Редактировать бота</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editBotForm">
+                        <input type="hidden" id="editBotId">
+                        <div class="mb-3">
+                            <label class="form-label">Название бота</label>
+                            <input type="text" class="form-control" id="editBotName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Токен</label>
+                            <input type="text" class="form-control" id="editBotToken" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Base URL</label>
+                            <input type="text" class="form-control" id="editBotBaseUrl">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Стартовое сообщение</label>
+                            <textarea class="form-control" id="editBotStartMessage" rows="4"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Меню (JSON формат)</label>
+                            <textarea class="form-control" id="editBotMenuConfig" rows="6"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" onclick="updateBot()">Сохранить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно логов бота -->
+    <div class="modal fade" id="logsModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Логи бота: <span id="logsBotName"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                     <div class="mb-3 d-flex gap-2">
+                         <button class="btn btn-sm btn-danger" onclick="clearCurrentBotLogs()">🗑️ Очистить</button>
+                     </div>
+                    <div id="logsList" style="max-height: 500px; overflow-y: auto; font-family: monospace; font-size: 13px;">
+                        <div class="alert alert-info">Загрузка логов...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

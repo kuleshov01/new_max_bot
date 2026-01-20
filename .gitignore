@@ -1,0 +1,27 @@
+# Конфигурационные файлы с токенами
+config.py
+
+# Файлы логов
+*.log
+bot.log
+
+# Временные файлы Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Виртуальные окружения
+venv/
+env/
+ENV/
+
+# Файлы IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Переменные окружения
+.env
+.env.local

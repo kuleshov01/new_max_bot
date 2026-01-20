@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Редактор диалоговых потоков</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/flow.css') }}">
+</head>
+<body>
+    <div id="app">
+        <div class="sidebar">
+            <h3>Редактор ботов</h3>
+            
+            <div class="sidebar-section">
+                <h4>Выберите бота</h4>
+                <select id="botSelect">
+                    <option value="new">+ Создать нового бота...</option>
+                </select>
+            </div>
+            
+            <div class="sidebar-section">
+                <h4>Инструменты</h4>
+                <button class="btn btn-add" onclick="addMessageNode()">+ Сообщение</button>
+                <button class="btn btn-add" onclick="addMenuNode()">+ Меню</button>
+                <button class="btn btn-action" onclick="saveFlow()">💾 Сохранить</button>
+                <button class="btn btn-action" onclick="exportFlow()">📤 Экспорт</button>
+                <button class="btn btn-action" onclick="importFlow()">📥 Импорт</button>
+            </div>
+            
+            <div class="sidebar-section">
+                <h4>Свойства узла</h4>
+                <div id="nodeProperties">
+                    <p>Выберите узел для редактирования</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <div id="flowCanvas">
+                <svg id="connections"></svg>
+                <div id="nodes"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/flow.js') }}"></script>
+</body>
+</html>
