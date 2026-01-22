@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-DB_FILE = '../data/db/bots_data.db'
+DB_FILE = '/storage/self/primary/Project/new_max_bot/data/db/bots_data.db'
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -47,15 +47,15 @@ def init_db():
     conn.commit()
     conn.close()
 
-def add_bot(name, token, base_url='https://platform-api.max.ru', start_message='', menu_config=''):
+def add_bot(name, token, base_url='https://platform-api.max.ru'):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
     now = datetime.now().isoformat()
     cursor.execute('''
-        INSERT INTO bots (name, token, base_url, start_message, menu_config, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'stopped', ?, ?)
-    ''', (name, token, base_url, start_message, json.dumps(menu_config) if menu_config else json.dumps([]), now, now))
+        INSERT INTO bots (name, token, base_url, status, created_at, updated_at)
+        VALUES (?, ?, ?, 'stopped', ?, ?)
+    ''', (name, token, base_url, now, now))
     
     bot_id = cursor.lastrowid
     conn.commit()
@@ -110,7 +110,7 @@ def get_all_bots():
         for bot in bots
     ]
 
-def update_bot(bot_id, name=None, token=None, base_url=None, start_message=None, menu_config=None):
+def update_bot(bot_id, name=None, token=None, base_url=None):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -126,12 +126,6 @@ def update_bot(bot_id, name=None, token=None, base_url=None, start_message=None,
     if base_url:
         updates.append('base_url = ?')
         values.append(base_url)
-    if start_message is not None:
-        updates.append('start_message = ?')
-        values.append(start_message)
-    if menu_config is not None:
-        updates.append('menu_config = ?')
-        values.append(json.dumps(menu_config))
     
     updates.append('updated_at = ?')
     values.append(datetime.now().isoformat())
@@ -163,6 +157,16 @@ def update_bot_status(bot_id, status):
     conn.close()
 
 def save_bot_flow(bot_id, flow_data):
+    # Проверяем, что flow не пустой
+    nodes = flow_data.get('nodes', [])
+    if not nodes:
+        raise ValueError("Cannot save empty flow - at least one node is required")
+    
+    # Проверяем, что есть хотя бы один start-узел
+    start_node = next((n for n in nodes if n.get('isStart')), None)
+    if not start_node:
+        raise ValueError("Cannot save flow without start node - at least one node must have isStart: true")
+    
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     

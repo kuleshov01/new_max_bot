@@ -69,24 +69,12 @@ async function createBot() {
     const name = document.getElementById('botName').value.trim();
     const token = document.getElementById('botToken').value.trim();
     const base_url = document.getElementById('botBaseUrl').value.trim();
-    const start_message = document.getElementById('botStartMessage').value.trim();
-    const menu_config_str = document.getElementById('botMenuConfig').value.trim();
-    
+
     if (!name || !token) {
         alert('Пожалуйста, заполните название и токен');
         return;
     }
-    
-    let menu_config = [];
-    if (menu_config_str) {
-        try {
-            menu_config = JSON.parse(menu_config_str);
-        } catch (e) {
-            alert('Ошибка в формате JSON для меню');
-            return;
-        }
-    }
-    
+
     try {
         const response = await fetch('/api/bots', {
             method: 'POST',
@@ -97,8 +85,8 @@ async function createBot() {
                 name,
                 token,
                 base_url,
-                start_message,
-                menu_config
+                start_message: '',
+                menu_config: []
             })
         });
         

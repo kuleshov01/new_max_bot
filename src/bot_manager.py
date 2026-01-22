@@ -332,6 +332,16 @@ class BotManager:
                 logging.warning(f"Bot {bot_id} is already running")
                 return True
             
+            # Проверить, есть ли flow и стартовая нода
+            flow_data = get_bot_flow(bot_id)
+            if not flow_data or not flow_data.get('nodes'):
+                logging.error(f"Cannot start bot {bot_id}: no flow configured")
+                return False
+            start_node = next((n for n in flow_data.get('nodes', []) if n.get('isStart')), None)
+            if not start_node:
+                logging.error(f"Cannot start bot {bot_id}: no start node in flow")
+                return False
+            
             self.bots[bot_id] = BotInstance(bot_id)
             self.bots[bot_id].start()
             return True

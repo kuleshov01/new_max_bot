@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, jsonify
 from database import add_bot, get_bot, get_all_bots, update_bot, delete_bot, get_bot_logs, clear_bot_logs
 from bot_manager import bot_manager
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='../templates', static_folder='../static')
 
 @app.route('/')
 def index():
@@ -27,13 +27,32 @@ def create_bot():
     name = data.get('name')
     token = data.get('token')
     base_url = data.get('base_url', 'https://platform-api.max.ru')
-    start_message = data.get('start_message', '')
-    menu_config = data.get('menu_config', [])
     
     if not name or not token:
         return jsonify({'error': 'Name and token are required'}), 400
     
-    bot_id = add_bot(name, token, base_url, start_message, menu_config)
+    bot_id = add_bot(name, token, base_url)
+    
+    # Создать начальный flow с узлом 'start'
+    from database import save_bot_flow
+    initial_flow = {
+        'nodes': [
+            {
+                'id': 'start',
+                'type': 'menu',
+                'x': 100,
+                'y': 100,
+                'text': '👋 Добро пожаловать! Выберите действие:',
+                'buttons': [
+                    {'id': 'start_1', 'text': 'Начать диалог'}
+                ],
+                'isStart': True
+            }
+        ],
+        'connections': []
+    }
+    save_bot_flow(bot_id, initial_flow)
+    
     bot = get_bot(bot_id)
     
     return jsonify(bot), 201
@@ -57,9 +76,7 @@ def update_bot_by_id(bot_id):
         bot_id,
         name=data.get('name'),
         token=data.get('token'),
-        base_url=data.get('base_url'),
-        start_message=data.get('start_message'),
-        menu_config=data.get('menu_config')
+        base_url=data.get('base_url')
     )
     
     bot = get_bot(bot_id)
@@ -113,8 +130,11 @@ def save_bot_flow(bot_id):
     
     flow_data = request.json
     from database import save_bot_flow
-    save_bot_flow(bot_id, flow_data)
-    return jsonify({'message': 'Flow saved successfully'})
+    try:
+        save_bot_flow(bot_id, flow_data)
+        return jsonify({'message': 'Flow saved successfully'})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
 @app.route('/api/bots/<int:bot_id>/logs', methods=['GET'])
 def get_bot_logs_endpoint(bot_id):
