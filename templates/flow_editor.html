@@ -20,11 +20,16 @@
             
             <div class="sidebar-section">
                 <h4>Инструменты</h4>
-                <button class="btn btn-add" onclick="addMessageNode()">+ Сообщение</button>
-                <button class="btn btn-add" onclick="addMenuNode()">+ Меню</button>
+                <button class="btn btn-add" onclick="addElement()">+ Добавить элемент</button>
                 <button class="btn btn-action" onclick="saveFlow()">💾 Сохранить</button>
                 <button class="btn btn-action" onclick="exportFlow()">📤 Экспорт</button>
                 <button class="btn btn-action" onclick="importFlow()">📥 Импорт</button>
+            </div>
+
+            <div class="sidebar-section">
+                <h4>Режим работы</h4>
+                <button class="btn btn-mode active" id="modeEdit" onclick="setMode('edit')">✏️ Редактирование</button>
+                <button class="btn btn-mode" id="modeConnect" onclick="setMode('connect')">🔗 Рисование связей</button>
             </div>
             
             <div class="sidebar-section">

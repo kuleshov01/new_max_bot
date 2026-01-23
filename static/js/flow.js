@@ -12,7 +12,8 @@ class FlowEditor {
         this.isDraggingCanvas = false;
         this.lastMousePos = { x: 0, y: 0 };
         this.currentBotId = null;
-        
+        this.mode = 'edit';
+
         this.init();
     }
     
@@ -126,7 +127,7 @@ class FlowEditor {
             buttons: [],
             isStart: false
         };
-        
+
         if (type === 'menu') {
             node.buttons = [
                 { id: `btn_${this.nodeIdCounter}_0`, text: 'Вариант 1', nextNodeId: null },
@@ -134,7 +135,26 @@ class FlowEditor {
                 { id: `btn_${this.nodeIdCounter}_back`, text: '⬅️ Назад', nextNodeId: null, isBack: true }
             ];
         }
-        
+
+        this.nodes.push(node);
+        this.render();
+        return node;
+    }
+
+    addUniversalElement() {
+        const node = {
+            id: `node_${this.nodeIdCounter++}`,
+            type: 'universal',
+            x: 300,
+            y: 100,
+            text: 'Введите сообщение...',
+            buttons: [
+                { id: `btn_${this.nodeIdCounter}_0`, text: 'Вариант 1', nextNodeId: null },
+                { id: `btn_${this.nodeIdCounter}_1`, text: 'Вариант 2', nextNodeId: null }
+            ],
+            isStart: false
+        };
+
         this.nodes.push(node);
         this.render();
         return node;
@@ -174,24 +194,51 @@ class FlowEditor {
         this.render();
     }
     
-    addConnection(buttonId, toNodeId) {
+    addConnection(buttonId, toNodeId, fromNodeId) {
         this.connections = this.connections.filter(c => c.buttonId !== buttonId);
-        
-        if (toNodeId) {
-            const fromNodeId = this.findNodeIdByButton(buttonId);
-            if (fromNodeId && toNodeId !== fromNodeId) {
-                this.connections.push({
-                    id: `conn_${this.nodeIdCounter++}`,
-                    buttonId: buttonId,
-                    from: fromNodeId,
-                    to: toNodeId
-                });
+
+        if (toNodeId && fromNodeId && toNodeId !== fromNodeId) {
+            this.connections.push({
+                id: `conn_${this.nodeIdCounter++}`,
+                buttonId: buttonId,
+                from: fromNodeId,
+                to: toNodeId
+            });
+
+            const fromNode = this.nodes.find(n => n.id === fromNodeId);
+            if (fromNode && fromNode.buttons) {
+                const button = fromNode.buttons.find(b => b.id === buttonId);
+                if (button) {
+                    button.nextNodeId = toNodeId;
+                }
+            }
+        } else {
+            const fromNode = this.nodes.find(n => n.id === fromNodeId);
+            if (fromNode && fromNode.buttons) {
+                const button = fromNode.buttons.find(b => b.id === buttonId);
+                if (button) {
+                    button.nextNodeId = null;
+                }
             }
         }
-        
+
         this.render();
     }
-    
+
+    addNodeConnection(fromNodeId, toNodeId) {
+        this.connections = this.connections.filter(c => !(c.from === fromNodeId && !c.buttonId));
+
+        if (toNodeId && fromNodeId && toNodeId !== fromNodeId) {
+            this.connections.push({
+                id: `conn_${this.nodeIdCounter++}`,
+                from: fromNodeId,
+                to: toNodeId
+            });
+        }
+
+        this.render();
+    }
+
     findNodeIdByButton(buttonId) {
         for (const node of this.nodes) {
             if (node.buttons) {
@@ -209,26 +256,52 @@ class FlowEditor {
         const rect = this.canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left - this.offset.x) / this.scale;
         const y = (e.clientY - rect.top - this.offset.y) / this.scale;
-        
-        if (e.target.classList.contains('connector')) {
-            this.draggedConnector = e.target.dataset.buttonId;
-            this.tempConnection = {
-                startX: x,
-                startY: y,
-                endX: x,
-                endY: y
-            };
-            e.stopPropagation();
-        } else if (e.target.closest('.node')) {
+
+        if (this.mode === 'connect') {
+            if (e.target.closest('.node-button') && e.target.closest('.node-button').dataset.buttonConnectable === 'true') {
+                const buttonEl = e.target.closest('.node-button');
+                const buttonId = buttonEl.dataset.buttonId;
+                const nodeId = buttonEl.closest('.node').dataset.id;
+
+                this.draggedConnector = { type: 'button', id: buttonId, fromNode: nodeId };
+                this.tempConnection = {
+                    startX: x,
+                    startY: y,
+                    endX: x,
+                    endY: y
+                };
+                e.stopPropagation();
+                return;
+            } else if (e.target.closest('.node') && e.target.closest('.node').dataset.nodeConnectable === 'true') {
+                const nodeId = e.target.closest('.node').dataset.id;
+                if (e.target.classList.contains('delete-btn')) {
+                    this.deleteNode(nodeId);
+                    e.stopPropagation();
+                    return;
+                }
+
+                this.draggedConnector = { type: 'node', id: nodeId };
+                this.tempConnection = {
+                    startX: x,
+                    startY: y,
+                    endX: x,
+                    endY: y
+                };
+                e.stopPropagation();
+                return;
+            }
+        }
+
+        if (e.target.closest('.node')) {
             const nodeEl = e.target.closest('.node');
             const nodeId = nodeEl.dataset.id;
-            
+
             if (e.target.classList.contains('delete-btn')) {
                 this.deleteNode(nodeId);
                 e.stopPropagation();
                 return;
             }
-            
+
             this.selectNode(nodeId);
             this.draggedNode = nodeId;
             this.dragOffset = {
@@ -276,14 +349,19 @@ class FlowEditor {
             const target = e.target.closest('.node');
             if (target) {
                 const toNodeId = target.dataset.id;
-                this.addConnection(this.draggedConnector, toNodeId);
+
+                if (this.draggedConnector.type === 'button') {
+                    this.addConnection(this.draggedConnector.id, toNodeId, this.draggedConnector.fromNode);
+                } else if (this.draggedConnector.type === 'node') {
+                    this.addNodeConnection(this.draggedConnector.id, toNodeId);
+                }
             } else {
                 this.renderConnections();
             }
             this.draggedConnector = null;
             this.tempConnection = null;
         }
-        
+
         this.draggedNode = null;
         this.isDraggingCanvas = false;
     }
@@ -310,7 +388,18 @@ class FlowEditor {
             this.loadBotFlow(botId);
         }
     }
-    
+
+    setMode(mode) {
+        this.mode = mode;
+        document.getElementById('modeEdit').classList.toggle('active', mode === 'edit');
+        document.getElementById('modeConnect').classList.toggle('active', mode === 'connect');
+
+        if (mode === 'connect') {
+            this.canvas.style.cursor = 'crosshair';
+        } else {
+            this.canvas.style.cursor = 'grab';
+        }
+    }
     selectNode(nodeId) {
         this.selectedNode = nodeId;
         const node = this.nodes.find(n => n.id === nodeId);
@@ -323,15 +412,15 @@ class FlowEditor {
             this.nodeProperties.innerHTML = '<p>Выберите узел для редактирования</p>';
             return;
         }
-        
+
         let html = `
             <div class="property-group">
                 <label>Текст сообщения:</label>
                 <textarea id="nodeText">${node.text}</textarea>
             </div>
         `;
-        
-        if (node.type === 'menu' && node.buttons) {
+
+        if ((node.type === 'menu' || node.type === 'universal') && node.buttons) {
             html += `
                 <div class="property-group">
                     <label>Кнопки:</label>
@@ -340,15 +429,15 @@ class FlowEditor {
                 </div>
             `;
         }
-        
+
         this.nodeProperties.innerHTML = html;
-        
+
         const textArea = document.getElementById('nodeText');
         textArea.addEventListener('input', (e) => {
             this.updateNode(node.id, { text: e.target.value });
         });
-        
-        if (node.type === 'menu') {
+
+        if (node.type === 'menu' || node.type === 'universal') {
             this.renderButtonsList(node);
         }
     }
@@ -433,38 +522,51 @@ class FlowEditor {
     }
     
     render() {
+        this.syncConnections();
         this.renderNodes();
         this.renderConnections();
     }
-    
+
     renderNodes() {
-        this.nodesContainer.innerHTML = this.nodes.map(node => `
-            <div class="node node-${node.type} ${this.selectedNode === node.id ? 'selected' : ''}" 
+        const validation = this.validateConnectivity();
+        const disconnectedIds = new Set(validation.disconnected);
+        const isConnectMode = this.mode === 'connect';
+
+        this.nodesContainer.className = isConnectMode ? 'mode-connect' : 'mode-edit';
+
+        this.nodesContainer.innerHTML = this.nodes.map(node => {
+            const isDisconnected = !node.isStart && disconnectedIds.has(node.id);
+            const nodeTypeClass = node.type === 'universal' ? 'message' : node.type;
+            return `
+            <div class="node node-${nodeTypeClass} ${this.selectedNode === node.id ? 'selected' : ''} ${isDisconnected ? 'disconnected' : ''}"
                  data-id="${node.id}"
+                 data-node-connectable="true"
                  style="left: ${node.x}px; top: ${node.y}px;">
                 <div class="node-header">
-                    <span>${node.isStart ? '🚀 Начало' : (node.type === 'message' ? '💬 Сообщение' : '🎯 Меню')}</span>
+                    <span>${node.isStart ? '🚀 Начало' : (node.type === 'message' || node.type === 'universal' ? '💬 Элемент' : '🎯 Элемент')}</span>
                     ${!node.isStart ? '<button class="delete-btn">🗑️</button>' : ''}
                 </div>
                 <div class="node-content">
                     <div class="node-text">${this.escapeHtml(node.text).replace(/\n/g, '<br>')}</div>
-                    ${node.buttons ? `
+                    ${node.buttons && node.buttons.length > 0 ? `
                         <div class="node-buttons">
                             ${node.buttons.map(btn => `
-                                <div class="node-button">
+                                <div class="node-button" data-button-connectable="true" data-button-id="${btn.id}">
                                     <span>${btn.text}</span>
-                                    <div class="connector" data-button-id="${btn.id}"></div>
+                                    ${isConnectMode ? '<div class="connector-badge">🔗</div>' : ''}
                                 </div>
                             `).join('')}
                         </div>
                     ` : ''}
+                    ${isConnectMode && !node.isStart ? '<div class="node-connector-target" title="Перетащите для соединения"></div>' : ''}
                 </div>
             </div>
-        `).join('');
-        
+        `}).join('');
+
         this.nodesContainer.style.transform = `translate(${this.offset.x}px, ${this.offset.y}px) scale(${this.scale})`;
+        this.connectionsSvg.style.transform = `translate(${this.offset.x}px, ${this.offset.y}px) scale(${this.scale})`;
     }
-    
+
     renderConnections() {
         let svg = `
             <defs>
@@ -513,23 +615,26 @@ class FlowEditor {
     calculateConnectionPath(conn) {
         const fromNode = this.nodes.find(n => n.id === conn.from);
         const toNode = this.nodes.find(n => n.id === conn.to);
-        
+
         if (!fromNode || !toNode) return null;
-        
+
         let startY = fromNode.y + 50;
-        if (fromNode.buttons && conn.buttonId) {
+
+        if (conn.buttonId && fromNode.buttons) {
             const btnIndex = fromNode.buttons.findIndex(b => b.id === conn.buttonId);
             if (btnIndex !== -1) {
                 startY = fromNode.y + 70 + (btnIndex * 35);
             }
+        } else if (!conn.buttonId) {
+            startY = fromNode.y + 50;
         }
-        
+
         const startX = fromNode.x + 250;
         const endX = toNode.x;
         const endY = toNode.y + 50;
-        
+
         const midX = (startX + endX) / 2;
-        
+
         return `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`;
     }
     
@@ -538,18 +643,80 @@ class FlowEditor {
         div.textContent = text;
         return div.innerHTML;
     }
-    
+
+    validateConnectivity() {
+        const disconnectedNodes = [];
+        const connectedNodeIds = new Set();
+        const nodeIdWithOutgoing = new Set();
+
+        if (this.nodes.length === 0) return { valid: true, disconnected: [] };
+
+        connectedNodeIds.add('start');
+
+        this.connections.forEach(conn => {
+            connectedNodeIds.add(conn.to);
+            nodeIdWithOutgoing.add(conn.from);
+        });
+
+        this.nodes.forEach(node => {
+            if (!node.isStart && !connectedNodeIds.has(node.id) && !nodeIdWithOutgoing.has(node.id)) {
+                disconnectedNodes.push(node.id);
+            }
+        });
+
+        return {
+            valid: disconnectedNodes.length === 0,
+            disconnected: disconnectedNodes
+        };
+    }
+
+    syncConnections() {
+        this.nodes.forEach(node => {
+            if (node.buttons) {
+                node.buttons.forEach(btn => {
+                    if (btn.nextNodeId) {
+                        const existingConn = this.connections.find(c => c.buttonId === btn.id);
+                        if (!existingConn) {
+                            this.connections.push({
+                                id: `conn_${this.nodeIdCounter++}`,
+                                buttonId: btn.id,
+                                from: node.id,
+                                to: btn.nextNodeId
+                            });
+                        } else if (existingConn.to !== btn.nextNodeId) {
+                            existingConn.to = btn.nextNodeId;
+                        }
+                    } else {
+                        this.connections = this.connections.filter(c => c.buttonId !== btn.id);
+                    }
+                });
+            }
+        });
+    }
+
     async saveFlow() {
+        this.syncConnections();
+
+        const validation = this.validateConnectivity();
+        if (!validation.valid && validation.disconnected.length > 0) {
+            const nodeNames = validation.disconnected.map(id => {
+                const node = this.nodes.find(n => n.id === id);
+                return node ? node.text.substring(0, 20) + '...' : id;
+            }).join(', ');
+            alert(`Невозможно сохранить! Существуют несвязанные элементы:\n\n${nodeNames}\n\nВсе элементы должны быть подключены к цепочке диалога.`);
+            return;
+        }
+
         if (!this.currentBotId) {
             alert('Сначала выберите бота для сохранения');
             return;
         }
-        
+
         const flowData = {
             nodes: this.nodes,
             connections: this.connections
         };
-        
+
         try {
             const response = await fetch(`/api/bots/${this.currentBotId}/flow`, {
                 method: 'POST',
@@ -558,7 +725,6 @@ class FlowEditor {
                 },
                 body: JSON.stringify(flowData)
             });
-            
             if (response.ok) {
                 alert('Диалог сохранен успешно!');
             } else {
@@ -609,12 +775,8 @@ class FlowEditor {
     }
 }
 
-function addMessageNode() {
-    flowEditor.addNode('message', 300, 100);
-}
-
-function addMenuNode() {
-    flowEditor.addNode('menu', 300, 100);
+function addElement() {
+    flowEditor.addUniversalElement();
 }
 
 function saveFlow() {
@@ -627,6 +789,10 @@ function exportFlow() {
 
 function importFlow() {
     flowEditor.importFlow();
+}
+
+function setMode(mode) {
+    flowEditor.setMode(mode);
 }
 
 let flowEditor;
