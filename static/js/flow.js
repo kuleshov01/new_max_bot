@@ -171,6 +171,7 @@ class FlowEditor {
             headers: '{}',
             body: '{}',
             extractVars: '[]',
+            ignoreError: false, // Whether to ignore error responses and not create error connections
             isStart: false
         };
 
@@ -262,13 +263,36 @@ class FlowEditor {
     }
 
     addNodeConnection(fromNodeId, toNodeId) {
-        this.connections = this.connections.filter(c => !(c.from === fromNodeId && !c.buttonId));
+        // Remove only regular node connections (without buttonId and without type)
+        // Preserve API connections (which have a type property)
+        this.connections = this.connections.filter(c =>
+            !(c.from === fromNodeId && !c.buttonId && !c.type)
+        );
 
         if (toNodeId && fromNodeId && toNodeId !== fromNodeId) {
             this.connections.push({
                 id: `conn_${this.nodeIdCounter++}`,
                 from: fromNodeId,
                 to: toNodeId
+            });
+        }
+
+        this.render();
+    }
+
+    addApiConnection(fromNodeId, toNodeId, connectionType) {
+        // Remove any existing API connections of the same type from this node
+        // But keep other types (e.g., keep 'error' when adding 'success')
+        this.connections = this.connections.filter(c =>
+            !(c.from === fromNodeId && c.type === connectionType)
+        );
+
+        if (toNodeId && fromNodeId && toNodeId !== fromNodeId) {
+            this.connections.push({
+                id: `conn_${this.nodeIdCounter++}`,
+                from: fromNodeId,
+                to: toNodeId,
+                type: connectionType  // 'success' or 'error'
             });
         }
 
@@ -294,7 +318,29 @@ class FlowEditor {
         const y = (e.clientY - rect.top - this.offset.y) / this.scale;
 
         if (this.mode === 'connect') {
-            if (e.target.closest('.node-button') && e.target.closest('.node-button').dataset.buttonConnectable === 'true') {
+            // Handle API connector clicks
+            if (e.target.closest('.api-connector')) {
+                const connectorEl = e.target.closest('.api-connector');
+                const connectionType = connectorEl.dataset.connectionType;
+                const nodeId = connectorEl.closest('.node').dataset.id;
+
+                this.draggedConnector = {
+                    type: 'api',
+                    id: `${nodeId}_${connectionType}`,
+                    fromNode: nodeId,
+                    connectionType: connectionType
+                };
+                this.tempConnection = {
+                    startX: x,
+                    startY: y,
+                    endX: x,
+                    endY: y
+                };
+                e.stopPropagation();
+                return;
+            }
+            // Handle regular button clicks
+            else if (e.target.closest('.node-button') && e.target.closest('.node-button').dataset.buttonConnectable === 'true') {
                 const buttonEl = e.target.closest('.node-button');
                 const buttonId = buttonEl.dataset.buttonId;
                 const nodeId = buttonEl.closest('.node').dataset.id;
@@ -308,11 +354,21 @@ class FlowEditor {
                 };
                 e.stopPropagation();
                 return;
-            } else if (e.target.closest('.node') && e.target.closest('.node').dataset.nodeConnectable === 'true') {
+            }
+            // Handle node connector clicks
+            else if (e.target.closest('.node') && e.target.closest('.node').dataset.nodeConnectable === 'true') {
                 const nodeId = e.target.closest('.node').dataset.id;
+                const node = this.nodes.find(n => n.id === nodeId);
+
                 if (e.target.classList.contains('delete-btn')) {
                     this.deleteNode(nodeId);
                     e.stopPropagation();
+                    return;
+                }
+
+                // Prevent node connections for API nodes - they should only use API connectors
+                if (node && node.type === 'api_request') {
+                    // Don't allow general node connections for API nodes
                     return;
                 }
 
@@ -390,6 +446,8 @@ class FlowEditor {
                     this.addConnection(this.draggedConnector.id, toNodeId, this.draggedConnector.fromNode);
                 } else if (this.draggedConnector.type === 'node') {
                     this.addNodeConnection(this.draggedConnector.id, toNodeId);
+                } else if (this.draggedConnector.type === 'api') {
+                    this.addApiConnection(this.draggedConnector.fromNode, toNodeId, this.draggedConnector.connectionType);
                 }
             } else {
                 this.renderConnections();
@@ -435,6 +493,8 @@ class FlowEditor {
         } else {
             this.canvas.style.cursor = 'grab';
         }
+
+        this.render();
     }
     selectNode(nodeId) {
         this.selectedNode = nodeId;
@@ -505,6 +565,12 @@ class FlowEditor {
                         `).join('')}
                     </div>
                     <button class="btn btn-add" id="btnAddExtractVar" data-node-id="${node.id}">+ Добавить переменную</button>
+                </div>
+                <div class="property-group">
+                    <label>
+                        <input type="checkbox" id="apiIgnoreError" ${node.ignoreError ? 'checked' : ''}>
+                        Игнорировать ошибочные ответы API <span class="tooltip-icon" data-tooltip="Если включено, при ошибке API не будет создаваться отдельное соединение">ℹ️</span>
+                    </label>
                 </div>
                 <button class="btn btn-action" onclick="flowEditor.testApiRequest('${node.id}')">🧪 Тестировать запрос <span class="tooltip-icon" data-tooltip="Выполняет запрос к API без сохранения переменных. Полезно для проверки URL, заголовков и ответа сервера перед деплоем бота.">ℹ️</span></button>
             `;
@@ -647,6 +713,13 @@ class FlowEditor {
                     this.updateExtractVar(node.id, parseInt(e.target.dataset.index), 'var', e.target.value);
                 });
             });
+
+            const apiIgnoreError = document.getElementById('apiIgnoreError');
+            if (apiIgnoreError) {
+                apiIgnoreError.addEventListener('change', (e) => {
+                    this.updateNode(node.id, { ignoreError: e.target.checked });
+                });
+            }
         } else if (node.type === 'condition') {
             const nodeCondition = document.getElementById('nodeCondition');
             if (nodeCondition) {
@@ -922,7 +995,21 @@ class FlowEditor {
                             `).join('')}
                         </div>
                     ` : ''}
-                    ${isConnectMode && !node.isStart ? '<div class="node-connector-target" title="Перетащите для соединения"></div>' : ''}
+                    ${isConnectMode && node.type === 'api_request' ? `
+                        <div class="api-connection-options">
+                            <div class="api-connector api-success-connector" data-connection-type="success" title="Соединение при успешном ответе">
+                                <div class="connector-badge">✅</div>
+                                <span>Success</span>
+                            </div>
+                            ${!node.ignoreError ? `
+                                <div class="api-connector api-error-connector" data-connection-type="error" title="Соединение при ошибке">
+                                    <div class="connector-badge">❌</div>
+                                    <span>Error</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    ` : ''}
+                    ${isConnectMode && !node.isStart && node.type !== 'api_request' ? '<div class="node-connector-target" title="Перетащите для соединения"></div>' : ''}
                 </div>
             </div>
         `}).join('');
@@ -984,7 +1071,22 @@ class FlowEditor {
                     marker = 'url(#arrowhead-error)';
                 }
 
-                svg += `<path class="connection-line" d="${path}" style="stroke: ${stroke}; marker-end: ${marker};" />`;
+                let cssClass = 'connection-line';
+                if (conn.type === 'success') {
+                    cssClass += ' success';
+                } else if (conn.type === 'error') {
+                    cssClass += ' error';
+                }
+
+                // Add stroke-width variation for better visual distinction
+                let strokeWidth = 2;
+                if (conn.type === 'success') {
+                    strokeWidth = 3;
+                } else if (conn.type === 'error') {
+                    strokeWidth = 3;
+                }
+
+                svg += `<path class="${cssClass}" d="${path}" style="stroke: ${stroke}; stroke-width: ${strokeWidth}; marker-end: ${marker};" />`;
 
                 let label = '';
                 let startX = fromNode.x + 250;
@@ -1060,8 +1162,9 @@ class FlowEditor {
         const disconnectedNodes = [];
         const connectedNodeIds = new Set();
         const nodeIdWithOutgoing = new Set();
+        const apiNodeErrors = [];
 
-        if (this.nodes.length === 0) return { valid: true, disconnected: [] };
+        if (this.nodes.length === 0) return { valid: true, disconnected: [], apiErrors: [] };
 
         connectedNodeIds.add('start');
 
@@ -1074,11 +1177,28 @@ class FlowEditor {
             if (!node.isStart && !connectedNodeIds.has(node.id) && !nodeIdWithOutgoing.has(node.id)) {
                 disconnectedNodes.push(node.id);
             }
+
+            // Check API nodes for required connections
+            if (node.type === 'api_request') {
+                const apiConnections = this.connections.filter(c => c.from === node.id);
+                const hasSuccess = apiConnections.some(c => c.type === 'success');
+                const hasError = apiConnections.some(c => c.type === 'error');
+
+                if (!node.ignoreError && (!hasSuccess || !hasError)) {
+                    let errorMessage = `API узел "${node.url ? node.url.substring(0, 30) + '...' : 'Без URL'}" требует подключения как минимум Success и Error.`;
+                    if (!hasSuccess) errorMessage += ' Отсутствует Success соединение.';
+                    if (!hasError) errorMessage += ' Отсутствует Error соединение.';
+                    apiNodeErrors.push(errorMessage);
+                } else if (node.ignoreError && !hasSuccess) {
+                    apiNodeErrors.push(`API узел "${node.url ? node.url.substring(0, 30) + '...' : 'Без URL'}" требует подключения Success соединения.`);
+                }
+            }
         });
 
         return {
-            valid: disconnectedNodes.length === 0,
-            disconnected: disconnectedNodes
+            valid: disconnectedNodes.length === 0 && apiNodeErrors.length === 0,
+            disconnected: disconnectedNodes,
+            apiErrors: apiNodeErrors
         };
     }
 
@@ -1110,12 +1230,26 @@ class FlowEditor {
         this.syncConnections();
 
         const validation = this.validateConnectivity();
-        if (!validation.valid && validation.disconnected.length > 0) {
-            const nodeNames = validation.disconnected.map(id => {
-                const node = this.nodes.find(n => n.id === id);
-                return node ? node.text.substring(0, 20) + '...' : id;
-            }).join(', ');
-            alert(`Невозможно сохранить! Существуют несвязанные элементы:\n\n${nodeNames}\n\nВсе элементы должны быть подключены к цепочке диалога.`);
+
+        if (!validation.valid) {
+            let errorMessage = "Невозможно сохранить! ";
+
+            if (validation.disconnected.length > 0) {
+                const nodeNames = validation.disconnected.map(id => {
+                    const node = this.nodes.find(n => n.id === id);
+                    return node ? node.text.substring(0, 20) + '...' : id;
+                }).join(', ');
+                errorMessage += `Существуют несвязанные элементы:\n\n${nodeNames}\n\n`;
+            }
+
+            if (validation.apiErrors.length > 0) {
+                errorMessage += "Проблемы с API узлами:\n\n";
+                errorMessage += validation.apiErrors.join('\n');
+                errorMessage += "\n\n";
+            }
+
+            errorMessage += "Все элементы должны быть подключены к цепочке диалога.";
+            alert(errorMessage);
             return;
         }
 

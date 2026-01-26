@@ -335,6 +335,51 @@ select:focus, input:focus, textarea:focus {
     box-shadow: 0 0 12px rgba(102, 126, 234, 0.9);
 }
 
+.api-connection-options {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #e1e8ed;
+}
+
+.api-connector {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px;
+    background: #f8f9fa;
+    border: 2px solid #e1e8ed;
+    border-radius: 6px;
+    cursor: crosshair;
+    transition: all 0.3s;
+    font-size: 12px;
+}
+
+.api-connector:hover {
+    background: #e3f2fd;
+    border-color: #3498db;
+}
+
+.api-success-connector {
+    border-color: #38ef7d;
+}
+
+.api-success-connector:hover {
+    background: #e8f5e9;
+    border-color: #2ecc71;
+}
+
+.api-error-connector {
+    border-color: #e74c3c;
+}
+
+.api-error-connector:hover {
+    background: #ffebee;
+    border-color: #c0392b;
+}
+
 .mode-connect .node-button .connector {
     width: 16px;
     height: 16px;
@@ -382,6 +427,28 @@ select:focus, input:focus, textarea:focus {
 .connection-line:hover {
     stroke: #3498db;
     stroke-width: 3;
+}
+
+.connection-line.success {
+    stroke: #38ef7d;
+    stroke-width: 3;
+    stroke-dasharray: none;
+}
+
+.connection-line.error {
+    stroke: #e74c3c;
+    stroke-width: 3;
+    stroke-dasharray: 4, 2;
+}
+
+.connection-line.success:hover {
+    stroke: #2ecc71;
+    stroke-width: 4;
+}
+
+.connection-line.error:hover {
+    stroke: #c0392b;
+    stroke-width: 4;
 }
 
 .connection-label {
