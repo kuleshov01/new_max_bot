@@ -478,21 +478,47 @@ select:focus, input:focus, textarea:focus {
 
 #nodeProperties .button-item {
     background: #ecf0f1;
-    padding: 10px;
+    padding: 8px;
     border-radius: 6px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: nowrap;
+    overflow: visible;
 }
 
 #nodeProperties .button-text-input {
-    flex: 1;
-    margin-right: 10px;
-    padding: 6px 8px;
+    flex: 0 1 100px;
+    margin-right: 8px;
+    padding: 5px 7px;
     border: 1px solid #bdc3c7;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 12px;
+    width: auto !important;
+    max-width: 100px;
+}
+
+#nodeProperties .button-type-input {
+    margin-right: 8px;
+    padding: 5px 7px;
+    border: 1px solid #bdc3c7;
+    border-radius: 4px;
+    font-size: 12px;
+    width: auto !important;
+    min-width: 85px;
+    max-width: 100px;
+}
+
+#nodeProperties .button-url-input {
+    flex: 0 1 150px;
+    margin-right: 8px;
+    padding: 5px 7px;
+    border: 1px solid #bdc3c7;
+    border-radius: 4px;
+    font-size: 12px;
+    width: auto !important;
+    max-width: 150px;
 }
 
 #nodeProperties .remove-button {

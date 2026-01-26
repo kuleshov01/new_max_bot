@@ -111,22 +111,76 @@ class BotInstance:
     def handle_message(self, message):
         try:
             chat_id = message.get("chat", {}).get("id")
-            if not chat_id:
-                chat_id = self.extract_chat_id(message)
+            text = message.get("text", "").strip()
 
             if not chat_id:
-                self.log('WARNING', f'Не удалось извлечь chat_id из сообщения')
+                self.log('WARNING', 'Не удалось извлечь chat_id из сообщения')
                 return
 
-            text = message.get("text", "")
+            # Проверяем наличие контакта в сообщении
+            if "body" in message and isinstance(message["body"], dict):
+                body = message["body"]
+                if "attachments" in body and isinstance(body["attachments"], list):
+                    for attachment in body["attachments"]:
+                        if attachment.get("type") == "contact":
+                            contact = attachment.get("payload", {})
+                            phone_number = contact.get("phone_number", "")
+                            first_name = contact.get("first_name", "")
+                            
+                            self.log('INFO', f'Получен контакт от чата {chat_id}: {first_name} ({phone_number})')
+                            
+                            # Сохраняем контакт в состояние пользователя
+                            if chat_id not in self.user_states:
+                                self.user_states[chat_id] = {}
+                            
+                            self.user_states[chat_id]['contact_phone'] = phone_number
+                            self.user_states[chat_id]['contact_name'] = first_name
+                            
+                            # После получения контакта переходим к следующей ноде
+                            self.process_node_after_input(chat_id)
+                            return
+                        
+                        elif attachment.get("type") == "geo_location":
+                            location = attachment.get("payload", {})
+                            latitude = location.get("latitude", 0)
+                            longitude = location.get("longitude", 0)
+                            
+                            self.log('INFO', f'Получена геолокация от чата {chat_id}: {latitude}, {longitude}')
+                            
+                            # Сохраняем геолокацию в состояние пользователя
+                            if chat_id not in self.user_states:
+                                self.user_states[chat_id] = {}
+                            
+                            self.user_states[chat_id]['geo_latitude'] = latitude
+                            self.user_states[chat_id]['geo_longitude'] = longitude
+                            
+                            # После получения геолокации переходим к следующей ноде
+                            self.process_node_after_input(chat_id)
+                            return
 
+            # Обработка текстовых сообщений
             if text == "/start":
                 self.log('INFO', f'Команда /start от чата {chat_id}')
-                self.user_states[chat_id] = {'current_node': 'start', 'history': []}
+                self.user_states[chat_id] = {'current_node': None, 'history': []}
                 self.show_node(chat_id, 'start')
-            else:
-                self.log('DEBUG', f'Сообщение от чата {chat_id}: "{text[:30]}"')
-                self.handle_text_input(chat_id, text)
+                return
+
+            # Проверяем, ожидается ли текстовый ввод от пользователя
+            current_state = self.user_states.get(chat_id, {})
+            current_node_id = current_state.get('current_node')
+            
+            if current_node_id:
+                current_node = next((n for n in self.flow_data.get('nodes', []) if n['id'] == current_node_id), None)
+                if current_node and current_node.get('collectInput', False):
+                    self.log('INFO', f'Текст от пользователя {chat_id}: {text[:30]}...')
+                    self.user_states[chat_id]['user_text'] = text
+                    self.process_node_after_input(chat_id)
+                    return
+            
+            # Если это просто текстовое сообщение без ожидания, логируем
+            if text:
+                self.log('DEBUG', f'Текстовое сообщение от чата {chat_id}: {text[:30]}...')
+        
         except Exception as e:
             self.log('ERROR', f'Ошибка обработки сообщения: {e}')
 
@@ -158,7 +212,11 @@ class BotInstance:
             return
 
         self.log('INFO', f'Нажатие кнопки от чата {chat_id}: {payload}')
-        self.answer_callback(callback_id, "✓")
+        
+        # Отвечаем на callback только для кнопок типа callback
+        if payload.startswith('btn:'):
+            self.answer_callback(callback_id, "✓")
+        
         self.handle_button_press(chat_id, payload)
     
     def show_node(self, chat_id, node_id):
@@ -181,9 +239,17 @@ class BotInstance:
 
                 buttons = []
                 for btn in node['buttons']:
-                    buttons.append([
-                        {"type": "callback", "text": btn['text'], "payload": f"btn:{btn['id']}"}
-                    ])
+                    button_type = btn.get('type', 'callback')
+                    button = {"type": button_type, "text": btn['text']}
+                    
+                    if button_type == 'callback':
+                        button["payload"] = f"btn:{btn['id']}"
+                    elif button_type == 'link':
+                        button["url"] = btn.get('url', '')
+                    elif button_type == 'open_app':
+                        button["appId"] = btn.get('appId', '')
+                    
+                    buttons.append([button])
 
                 keyboard = {
                     "type": "inline_keyboard",
@@ -197,6 +263,7 @@ class BotInstance:
             self.log('ERROR', f'Ошибка отображения ноды {node_id}: {e}')
     
     def handle_button_press(self, chat_id, payload):
+        # Обработка только для кнопок типа callback (с префиксом btn:)
         if not payload.startswith('btn:'):
             return
 
@@ -218,19 +285,29 @@ class BotInstance:
             self.log('WARNING', f'Текущая нода {current_node_id} не найдена')
             return
 
+        # Проверяем тип кнопки и обрабатываем её
         if current_node.get('buttons'):
             button = next((b for b in current_node['buttons'] if b['id'] == button_id), None)
-            if button and button.get('isBack'):
-                if history:
-                    prev_node_id = history.pop()
-                    self.user_states[chat_id]['history'] = history
-                    self.log('DEBUG', f'Переад на предыдущую ноду {prev_node_id} (кнопка "Назад")')
-                    self.show_node(chat_id, prev_node_id)
-                else:
-                    self.log('DEBUG', 'Переад на старт (история пуста)')
-                    self.show_node(chat_id, 'start')
-                return
+            
+            if button:
+                # Для кнопок типа link или open_app просто выполняем действие без перехода
+                if button.get('type') in ['link', 'open_app']:
+                    self.log('DEBUG', f'Кнопка {button_id} типа {button.get("type")} выполнена без перехода')
+                    return
+                
+                # Кнопка Назад
+                if button.get('isBack'):
+                    if history:
+                        prev_node_id = history.pop()
+                        self.user_states[chat_id]['history'] = history
+                        self.log('DEBUG', f'Переад на предыдущую ноду {prev_node_id} (кнопка "Назад")')
+                        self.show_node(chat_id, prev_node_id)
+                    else:
+                        self.log('DEBUG', 'Переад на старт (история пуста)')
+                        self.show_node(chat_id, 'start')
+                    return
 
+        # Переход к следующей ноде по соединению
         connection = next((c for c in self.flow_data.get('connections', []) if c['buttonId'] == button_id), None)
         if connection and connection.get('to'):
             history.append(current_node_id)
@@ -243,6 +320,29 @@ class BotInstance:
     
     def handle_text_input(self, chat_id, text):
         pass
+    
+    def process_node_after_input(self, chat_id):
+        """Переход к следующей ноде после получения ввода от пользователя"""
+        current_state = self.user_states.get(chat_id, {})
+        current_node_id = current_state.get('current_node')
+        
+        if not current_node_id:
+            return
+        
+        # Ищем соединение от текущей ноды
+        connection = next((c for c in self.flow_data.get('connections', []) 
+                          if c['from'] == current_node_id and not c.get('buttonId')), None)
+        
+        if connection and connection.get('to'):
+            history = current_state.get('history', [])
+            history.append(current_node_id)
+            self.user_states[chat_id]['history'] = history
+            
+            target_node_id = connection['to']
+            self.log('DEBUG', f'Переад после ввода: {current_node_id} -> {target_node_id}')
+            self.show_node(chat_id, target_node_id)
+        else:
+            self.log('DEBUG', f'Нет соединения для перехода от ноды {current_node_id}')
 
     def process_update(self, update, marker):
         update_type = update.get("update_type") or update.get("type")
@@ -258,9 +358,18 @@ class BotInstance:
             msg = update.get("message") or {}
             body = msg.get("body", {})
             text = body.get("text", "").strip()
-            if chat_id and text:
-                self.log('DEBUG', f'Событие: message_created, чат {chat_id}, текст: "{text[:20]}"')
-                self.handle_message({"chat": {"id": chat_id}, "text": text})
+            if chat_id:
+                # Полная структура сообщения для обработки
+                full_message = {
+                    "chat": {"id": chat_id},
+                    "text": text,
+                    "body": body
+                }
+                
+                if text:
+                    self.log('DEBUG', f'Событие: message_created, чат {chat_id}, текст: "{text[:20]}"')
+                
+                self.handle_message(full_message)
 
         elif update_type == "message_callback":
             cb = update.get("callback") or {}
