@@ -1515,7 +1515,62 @@ function setMode(mode) {
 let flowEditor;
 document.addEventListener('DOMContentLoaded', () => {
     flowEditor = new FlowEditor();
+
+    // Initialize tooltip functionality
+    initializeTooltips();
 });
+
+// Initialize tooltip functionality
+function initializeTooltips() {
+    // Create tooltip container if it doesn't exist
+    let tooltip = document.querySelector('.custom-tooltip');
+    if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.className = 'custom-tooltip';
+        tooltip.style.cssText = `
+            position: fixed;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            z-index: 10000;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+            max-width: 250px;
+            word-wrap: break-word;
+            white-space: normal;
+        `;
+        document.body.appendChild(tooltip);
+    }
+
+    // Add mouse events to all tooltip icons
+    document.addEventListener('mouseover', function(e) {
+        const tooltipIcon = e.target.closest('.tooltip-icon');
+        if (tooltipIcon) {
+            const text = tooltipIcon.getAttribute('data-tooltip');
+            if (text) {
+                tooltip.textContent = text;
+                tooltip.style.opacity = '1';
+            }
+        }
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (tooltip.style.opacity === '1') {
+            tooltip.style.left = (e.pageX + 10) + 'px';
+            tooltip.style.top = (e.pageY - 30) + 'px';
+        }
+    });
+
+    document.addEventListener('mouseout', function(e) {
+        const tooltipIcon = e.target.closest('.tooltip-icon');
+        if (tooltipIcon) {
+            tooltip.style.opacity = '0';
+        }
+    });
+}
 
 // Global function to toggle debug mode
 function toggleDebug() {
