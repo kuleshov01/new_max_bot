@@ -62,9 +62,12 @@ class BotInstance:
 
     def send_message(self, chat_id, text, attachments=None):
         try:
+            # Подставляем переменные в текст сообщения
+            processed_text = self.replace_variables(chat_id, text)
+            
             url = f"{self.base_url}/messages?access_token={self.bot_token}&chat_id={chat_id}"
             headers = {"Content-Type": "application/json"}
-            data = {"text": text, "format": "markdown"}
+            data = {"text": processed_text, "format": "markdown"}
             if attachments:
                 processed_attachments = []
                 for attachment in attachments:
@@ -72,7 +75,7 @@ class BotInstance:
                         processed_attachments.append(attachment)
                 if processed_attachments:
                     data["attachments"] = processed_attachments
-            self.log('DEBUG', f'Отправка сообщения в чат {chat_id}: "{text[:30]}..."')
+            self.log('DEBUG', f'Отправка сообщения в чат {chat_id}: "{processed_text[:30]}..."')
             response = requests.post(url, headers=headers, json=data, timeout=30)
             response.raise_for_status()
             self.log('INFO', f'Сообщение отправлено в чат {chat_id}')
@@ -122,19 +125,38 @@ class BotInstance:
                 body = message["body"]
                 if "attachments" in body and isinstance(body["attachments"], list):
                     for attachment in body["attachments"]:
+                        self.log('DEBUG', f'Обработка вложения от чата {chat_id}: {attachment}')
                         if attachment.get("type") == "contact":
                             contact = attachment.get("payload", {})
-                            phone_number = contact.get("phone_number", "")
-                            first_name = contact.get("first_name", "")
+                            contact_data = contact if isinstance(contact, dict) else {}
                             
-                            self.log('INFO', f'Получен контакт от чата {chat_id}: {first_name} ({phone_number})')
+                            # Извлекаем данные из max_info
+                            max_info = contact_data.get("max_info", {})
+                            first_name = max_info.get("first_name", "").strip()
+                            last_name = max_info.get("last_name", "").strip()
+                            name = max_info.get("name", "").strip()
+                            
+                            # Извлекаем телефон из vcf_info
+                            phone_number = ""
+                            vcf_info = contact_data.get("vcf_info", "")
+                            if vcf_info:
+                                import re
+                                phone_match = re.search(r'TEL[^:]*:([^\r\n]+)', vcf_info)
+                                if phone_match:
+                                    phone_number = phone_match.group(1).strip()
+                            
+                            full_name = name if name else f"{first_name} {last_name}".strip()
+                            
+                            self.log('INFO', f'Получен контакт от чата {chat_id}: {full_name} ({phone_number})')
                             
                             # Сохраняем контакт в состояние пользователя
                             if chat_id not in self.user_states:
                                 self.user_states[chat_id] = {}
                             
+                            self.user_states[chat_id]['contact_first_name'] = first_name
+                            self.user_states[chat_id]['contact_last_name'] = last_name
                             self.user_states[chat_id]['contact_phone'] = phone_number
-                            self.user_states[chat_id]['contact_name'] = first_name
+                            self.user_states[chat_id]['contact_name'] = full_name
                             
                             # После получения контакта переходим к следующей ноде
                             self.process_node_after_input(chat_id)
@@ -230,12 +252,38 @@ class BotInstance:
                 self.log('WARNING', f'Нода {node_id} не найдена')
                 return
 
+            if chat_id not in self.user_states:
+                self.user_states[chat_id] = {}
+            
             self.user_states[chat_id]['current_node'] = node_id
-            node_text = node.get('text', '')[:50]
+            node_text = node.get('text', '')
+            node_text_preview = node_text[:50]
+
+            # Обработка трансформаций
+            if node['type'] == 'transform':
+                transformations = node.get('transformations', [])
+                self.log('DEBUG', f'Выполнение {len(transformations)} трансформаций для чата {chat_id}')
+                
+                for transform in transformations:
+                    var_name = transform.get('var', '')
+                    expression = transform.get('expression', '')
+                    
+                    if var_name and expression:
+                        try:
+                            # Заменяем переменные в выражении
+                            result = self.evaluate_expression(chat_id, expression)
+                            self.user_states[chat_id][var_name] = result
+                            self.log('DEBUG', f'Трансформация {var_name} = {result}')
+                        except Exception as e:
+                            self.log('ERROR', f'Ошибка трансформации {var_name}: {e}')
+                
+                # После трансформации переходим к следующей ноде
+                self.process_node_after_input(chat_id)
+                return
 
             if node['type'] in ['menu', 'universal'] and node.get('buttons'):
                 buttons_count = len(node['buttons'])
-                self.log('DEBUG', f'Отображение ноды "{node_text}" с {buttons_count} кнопками для чата {chat_id}')
+                self.log('DEBUG', f'Отображение ноды "{node_text_preview}" с {buttons_count} кнопками для чата {chat_id}')
 
                 buttons = []
                 for btn in node['buttons']:
@@ -257,8 +305,22 @@ class BotInstance:
                 }
                 self.send_message(chat_id, node['text'], [keyboard])
             else:
-                self.log('DEBUG', f'Отображение ноды "{node_text}" (без кнопок) для чата {chat_id}')
+                self.log('DEBUG', f'Отображение ноды "{node_text_preview}" (без кнопок) для чата {chat_id}')
                 self.send_message(chat_id, node['text'])
+                
+                # Для нод без кнопок проверяем авто-переход
+                self.log('DEBUG', f'Проверка авто-перехода для ноды {node_id}')
+                connection = next((c for c in self.flow_data.get('connections', []) 
+                                  if c['from'] == node_id and not c.get('buttonId')), None)
+                self.log('DEBUG', f'Найдено соединение: {connection}')
+                if connection and connection.get('to'):
+                    history = self.user_states.get(chat_id, {}).get('history', [])
+                    history.append(node_id)
+                    self.user_states[chat_id]['history'] = history
+                    
+                    target_node_id = connection['to']
+                    self.log('DEBUG', f'Авто-переход: {node_id} -> {target_node_id}')
+                    self.show_node(chat_id, target_node_id)
         except Exception as e:
             self.log('ERROR', f'Ошибка отображения ноды {node_id}: {e}')
     
@@ -329,7 +391,28 @@ class BotInstance:
         if not current_node_id:
             return
         
-        # Ищем соединение от текущей ноды
+        current_node = next((n for n in self.flow_data.get('nodes', []) if n['id'] == current_node_id), None)
+        if not current_node:
+            self.log('WARNING', f'Текущая нода {current_node_id} не найдена')
+            return
+        
+        # Сначала проверяем, есть ли кнопки в ноде
+        if current_node.get('buttons'):
+            # Ищем соединение по кнопке (для request_contact, request_location и т.д.)
+            for btn in current_node['buttons']:
+                connection = next((c for c in self.flow_data.get('connections', []) 
+                                  if c['buttonId'] == btn['id']), None)
+                if connection and connection.get('to'):
+                    history = current_state.get('history', [])
+                    history.append(current_node_id)
+                    self.user_states[chat_id]['history'] = history
+                    
+                    target_node_id = connection['to']
+                    self.log('DEBUG', f'Переход после ввода по кнопке {btn["id"]}: {current_node_id} -> {target_node_id}')
+                    self.show_node(chat_id, target_node_id)
+                    return
+        
+        # Иначе ищем обычное соединение от ноды
         connection = next((c for c in self.flow_data.get('connections', []) 
                           if c['from'] == current_node_id and not c.get('buttonId')), None)
         
@@ -339,10 +422,55 @@ class BotInstance:
             self.user_states[chat_id]['history'] = history
             
             target_node_id = connection['to']
-            self.log('DEBUG', f'Переад после ввода: {current_node_id} -> {target_node_id}')
+            self.log('DEBUG', f'Переход после ввода: {current_node_id} -> {target_node_id}')
             self.show_node(chat_id, target_node_id)
         else:
             self.log('DEBUG', f'Нет соединения для перехода от ноды {current_node_id}')
+    
+    def evaluate_expression(self, chat_id, expression):
+        """Вычисляет выражение с подстановкой переменных"""
+        state = self.user_states.get(chat_id, {})
+        
+        # Получаем значения переменных
+        def get_var(var_name):
+            return str(state.get(var_name, ''))
+        
+        # Заменяем переменные в выражении
+        import re
+        pattern = r'\{\{(\w+)\}\}'
+        
+        def replace_var(match):
+            var_name = match.group(1)
+            value = get_var(var_name)
+            # Экранируем значение для безопасного использования в eval
+            return f"'{value}'"
+        
+        safe_expression = re.sub(pattern, replace_var, expression)
+        
+        try:
+            # Безопасное вычисление выражения
+            result = eval(safe_expression, {'__builtins__': {}}, {})
+            return str(result)
+        except Exception as e:
+            self.log('ERROR', f'Ошибка вычисления выражения "{expression}": {e}')
+            return ''
+    
+    def replace_variables(self, chat_id, text):
+        """Заменяет переменные в тексте на их значения"""
+        state = self.user_states.get(chat_id, {})
+        
+        import re
+        pattern = r'\{\{(\w+)\}\}'
+        
+        def replace_var(match):
+            var_name = match.group(1)
+            value = state.get(var_name, '')
+            # Если значение не найдено, оставляем переменную без изменений
+            if value == '' and var_name not in state:
+                return match.group(0)
+            return str(value)
+        
+        return re.sub(pattern, replace_var, text)
 
     def process_update(self, update, marker):
         update_type = update.get("update_type") or update.get("type")

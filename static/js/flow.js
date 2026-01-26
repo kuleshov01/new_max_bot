@@ -198,6 +198,22 @@ class FlowEditor {
         this.selectNode(node.id);
         return node;
     }
+
+    addTransformNode() {
+        const node = {
+            id: `node_${this.nodeIdCounter++}`,
+            type: 'transform',
+            x: 300,
+            y: 100,
+            transformations: [],
+            isStart: false
+        };
+
+        this.nodes.push(node);
+        this.render();
+        this.selectNode(node.id);
+        return node;
+    }
     
     updateNode(nodeId, updates) {
         const node = this.nodes.find(n => n.id === nodeId);
@@ -616,11 +632,51 @@ class FlowEditor {
                     <div class="variables-list">
                         <code>{{user_text}}</code> — текст пользователя<br>
                         <code>{{contact_phone}}</code> — телефон<br>
-                        <code>{{contact_name}}</code> — имя контакта<br>
+                        <code>{{contact_name}}</code> — полное имя<br>
+                        <code>{{contact_first_name}}</code> — имя<br>
+                        <code>{{contact_last_name}}</code> — фамилия<br>
                         <code>{{geo_latitude}}</code> — широта<br>
                         <code>{{geo_longitude}}</code> — долгота<br>
                         <code>{{response}}</code> — полный ответ API (если предыдущий узел был API)<br>
                         <code>{{*_переменные*}}</code> — переменные, извлеченные из API
+                    </div>
+                </div>
+            `;
+        } else if (node.type === 'transform') {
+            const transformations = node.transformations || [];
+            html = `
+                <div class="property-group">
+                    <label>Трансформации переменных:</label>
+                    <div class="help-box">
+                        <div class="help-box-title">Создайте новые переменные на основе существующих:</div>
+                        <div>• Исходное значение: <code>{{var_name}}</code></div>
+                        <div>• Выражение: используйте JavaScript для трансформации</div>
+                        <div>• Результат: сохраняется как <code>{{new_var_name}}</code></div>
+                    </div>
+                    <div id="transformationsList">
+                        ${transformations.map((t, i) => `
+                            <div class="transform-row">
+                                <input type="text" class="transform-var-input" data-index="${i}" value="${t.var || ''}" placeholder="new_var_name">
+                                <span>=</span>
+                                <input type="text" class="transform-expression-input" data-index="${i}" value="${t.expression || ''}" placeholder="{{contact_name}} + ' - ' + {{contact_phone}}">
+                                <button class="btn-remove-transform" data-node-id="${node.id}" data-index="${i}">✕</button>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button class="btn btn-add" id="btnAddTransform" data-node-id="${node.id}">+ Добавить трансформацию</button>
+                </div>
+                <div class="property-group">
+                    <label>Доступные переменные:</label>
+                    <div class="variables-list">
+                        <code>{{user_text}}</code> — текст пользователя<br>
+                        <code>{{contact_phone}}</code> — телефон<br>
+                        <code>{{contact_name}}</code> — полное имя<br>
+                        <code>{{contact_first_name}}</code> — имя<br>
+                        <code>{{contact_last_name}}</code> — фамилия<br>
+                        <code>{{geo_latitude}}</code> — широта<br>
+                        <code>{{geo_longitude}}</code> — долгота<br>
+                        <code>{{response}}</code> — полный ответ API<br>
+                        <code>{{*_переменные*}}</code> — переменные из API и предыдущих трансформаций
                     </div>
                 </div>
             `;
@@ -773,6 +829,36 @@ class FlowEditor {
                     });
                 });
             }
+
+            if (node.type === 'transform') {
+                document.querySelectorAll('.btn-remove-transform').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const nodeId = e.target.dataset.nodeId;
+                        const index = parseInt(e.target.dataset.index);
+                        this.removeTransform(nodeId, index);
+                    });
+                });
+
+                document.getElementById('btnAddTransform').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const nodeId = e.target.dataset.nodeId;
+                    this.addTransform(nodeId);
+                });
+
+                document.querySelectorAll('.transform-var-input').forEach(input => {
+                    input.addEventListener('input', (e) => {
+                        this.updateTransform(node.id, parseInt(e.target.dataset.index), 'var', e.target.value);
+                    });
+                });
+
+                document.querySelectorAll('.transform-expression-input').forEach(input => {
+                    input.addEventListener('input', (e) => {
+                        this.updateTransform(node.id, parseInt(e.target.dataset.index), 'expression', e.target.value);
+                    });
+                });
+            }
         }
     }
 
@@ -852,6 +938,38 @@ class FlowEditor {
         extractVars[index][field] = value;
 
         this.updateNode(nodeId, { extractVars: JSON.stringify(extractVars) });
+    }
+
+    addTransform(nodeId) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const transformations = node.transformations || [];
+        transformations.push({ var: '', expression: '' });
+
+        this.updateNode(nodeId, { transformations });
+        this.showNodeProperties(node);
+    }
+
+    removeTransform(nodeId, index) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const transformations = node.transformations || [];
+        transformations.splice(index, 1);
+
+        this.updateNode(nodeId, { transformations });
+        this.showNodeProperties(node);
+    }
+
+    updateTransform(nodeId, index, field, value) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const transformations = node.transformations || [];
+        transformations[index][field] = value;
+
+        this.updateNode(nodeId, { transformations });
     }
 
     async testApiRequest(nodeId) {
@@ -1020,12 +1138,17 @@ class FlowEditor {
             else if (node.type === 'message' || node.type === 'universal') icon = '💬 Элемент';
             else if (node.type === 'api_request') icon = '🌐 API Запрос';
             else if (node.type === 'condition') icon = '🔀 Условие';
+            else if (node.type === 'transform') icon = '⚙️ Обработка данных';
 
             let content = '';
             if (node.type === 'api_request') {
                 content = `<div class="node-text">${node.method} ${this.escapeHtml(node.url).substring(0, 40)}...</div>`;
             } else if (node.type === 'condition') {
                 content = `<div class="node-text">${this.escapeHtml(node.condition)}</div>`;
+            } else if (node.type === 'transform') {
+                const transformations = node.transformations || [];
+                const count = transformations.length;
+                content = `<div class="node-text">${count} трансформаций</div>`;
             } else {
                 content = `<div class="node-text">${this.escapeHtml(node.text).replace(/\n/g, '<br>')}</div>`;
             }
@@ -1494,6 +1617,10 @@ function addApiNode() {
 
 function addConditionNode() {
     flowEditor.addConditionNode();
+}
+
+function addTransformNode() {
+    flowEditor.addTransformNode();
 }
 
 function saveFlow() {

@@ -229,6 +229,11 @@ select:focus, input:focus, textarea:focus {
     color: white;
 }
 
+.node-transform .node-header {
+    background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    color: white;
+}
+
 .node-content {
     padding: 15px;
 }
@@ -580,6 +585,39 @@ select:focus, input:focus, textarea:focus {
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+.transform-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: center;
+}
+
+.transform-var-input {
+    flex: 0 0 120px;
+    padding: 5px 7px;
+    border: 1px solid #bdc3c7;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.transform-expression-input {
+    flex: 1;
+    padding: 5px 7px;
+    border: 1px solid #bdc3c7;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.btn-remove-transform {
+    background: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 5px 8px;
 }
 
 .help-box {
