@@ -219,6 +219,16 @@ select:focus, input:focus, textarea:focus {
     color: white;
 }
 
+.node-api_request .node-header {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+}
+
+.node-condition .node-header {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: white;
+}
+
 .node-content {
     padding: 15px;
 }
@@ -426,6 +436,91 @@ select:focus, input:focus, textarea:focus {
     border-radius: 4px;
     cursor: pointer;
     font-size: 12px;
+}
+
+.header-row,
+.extract-vars-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 8px;
+    align-items: center;
+}
+
+.header-row input,
+.extract-vars-row input {
+    margin: 0;
+    padding: 8px;
+    border: 2px solid #e1e8ed;
+    border-radius: 6px;
+    font-size: 13px;
+    transition: border-color 0.3s;
+}
+
+.header-row input:focus,
+.extract-vars-row input:focus {
+    outline: none;
+    border-color: #3498db;
+}
+
+.header-row .header-key-input,
+.extract-vars-row .extract-field-input {
+    flex: 1;
+    font-size: 13px;
+}
+
+.header-row .header-value-input,
+.extract-vars-row .extract-var-input {
+    flex: 2;
+    font-size: 13px;
+}
+
+.header-row .btn-remove-header,
+.extract-vars-row .btn-remove-extract {
+    flex: 0 0 40px;
+    background: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.help-box {
+    background: #f8f9fa;
+    border-left: 4px solid #3498db;
+    padding: 12px;
+    margin: 10px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+    color: #34495e;
+}
+
+.help-box-title {
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #2c3e50;
+}
+
+.help-box code {
+    background: #ebedef;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.variables-list {
+    background: #f8f9fa;
+    border-left: 4px solid #95a5a6;
+    padding: 12px;
+    margin-top: 8px;
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+    line-height: 1.5;
 }
 
 #currentBotInfo {
