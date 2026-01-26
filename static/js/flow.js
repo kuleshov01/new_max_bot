@@ -159,6 +159,42 @@ class FlowEditor {
         this.render();
         return node;
     }
+
+    addApiNode() {
+        const node = {
+            id: `node_${this.nodeIdCounter++}`,
+            type: 'api_request',
+            x: 300,
+            y: 100,
+            method: 'POST',
+            url: 'https://api.example.com/endpoint',
+            headers: '{}',
+            body: '{}',
+            extractVars: '[]',
+            isStart: false
+        };
+
+        this.nodes.push(node);
+        this.render();
+        this.selectNode(node.id);
+        return node;
+    }
+
+    addConditionNode() {
+        const node = {
+            id: `node_${this.nodeIdCounter++}`,
+            type: 'condition',
+            x: 300,
+            y: 100,
+            condition: '{{user_text}} == "999"',
+            isStart: false
+        };
+
+        this.nodes.push(node);
+        this.render();
+        this.selectNode(node.id);
+        return node;
+    }
     
     updateNode(nodeId, updates) {
         const node = this.nodes.find(n => n.id === nodeId);
@@ -413,32 +449,343 @@ class FlowEditor {
             return;
         }
 
-        let html = `
-            <div class="property-group">
-                <label>Текст сообщения:</label>
-                <textarea id="nodeText">${node.text}</textarea>
-            </div>
-        `;
+        let html = '';
 
-        if ((node.type === 'menu' || node.type === 'universal') && node.buttons) {
-            html += `
+        if (node.type === 'api_request') {
+            const headersData = this.parseHeaders(node.headers || '{}');
+            const extractVarsData = JSON.parse(node.extractVars || '[]');
+
+            html = `
                 <div class="property-group">
-                    <label>Кнопки:</label>
-                    <div id="buttonsList"></div>
-                    <button class="btn btn-add" onclick="flowEditor.addButton('${node.id}')">+ Добавить кнопку</button>
+                    <label>Метод:</label>
+                    <select id="apiMethod">
+                        <option value="GET" ${node.method === 'GET' ? 'selected' : ''}>GET</option>
+                        <option value="POST" ${node.method === 'POST' ? 'selected' : ''}>POST</option>
+                        <option value="PUT" ${node.method === 'PUT' ? 'selected' : ''}>PUT</option>
+                        <option value="DELETE" ${node.method === 'DELETE' ? 'selected' : ''}>DELETE</option>
+                        <option value="PATCH" ${node.method === 'PATCH' ? 'selected' : ''}>PATCH</option>
+                    </select>
+                </div>
+                <div class="property-group">
+                    <label>URL:</label>
+                    <input type="text" id="apiUrl" value="${node.url}" placeholder="https://api.example.com/{{user_text}}">
+                </div>
+                <div class="property-group">
+                    <label>Заголовки:</label>
+                    <div id="headersList">
+                        ${headersData.map((h, i) => `
+                            <div class="header-row">
+                                <input type="text" class="header-key-input" data-index="${i}" value="${h.key}" placeholder="Название">
+                                <input type="text" class="header-value-input" data-index="${i}" value="${h.value}" placeholder="Значение">
+                                <button class="btn-remove-header" data-node-id="${node.id}" data-index="${i}">✕</button>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button class="btn btn-add" id="btnAddHeader" data-node-id="${node.id}">+ Добавить заголовок</button>
+                </div>
+                <div class="property-group">
+                    <label>Тело запроса (JSON):</label>
+                    <textarea id="apiBody" rows="5" placeholder='{"text": "{{user_text}}"}'>${node.body || '{}'}</textarea>
+                </div>
+                <div class="property-group">
+                    <label>Извлечь переменные из ответа: <span class="tooltip-icon" data-tooltip="Извлекает данные из JSON ответа API в переменные для использования в следующих узлах. Поддерживает вложенность через точку.">ℹ️</span></label>
+                    <div class="help-box">
+                        <div class="help-box-title">Примеры:</div>
+                        <div>• <code>data.user_id</code> → <code>user_id</code></div>
+                        <div>• <code>items[0].name</code> → <code>first_item_name</code></div>
+                        <div>• <code>response.success</code> → <code>is_success</code></div>
+                    </div>
+                    <div id="extractVarsList">
+                        ${extractVarsData.map((v, i) => `
+                            <div class="extract-vars-row">
+                                <input type="text" class="extract-field-input" data-index="${i}" value="${v.field}" placeholder="data.user_id">
+                                <input type="text" class="extract-var-input" data-index="${i}" value="${v.var}" placeholder="user_id">
+                                <button class="btn-remove-extract" data-node-id="${node.id}" data-index="${i}">✕</button>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button class="btn btn-add" id="btnAddExtractVar" data-node-id="${node.id}">+ Добавить переменную</button>
+                </div>
+                <button class="btn btn-action" onclick="flowEditor.testApiRequest('${node.id}')">🧪 Тестировать запрос <span class="tooltip-icon" data-tooltip="Выполняет запрос к API без сохранения переменных. Полезно для проверки URL, заголовков и ответа сервера перед деплоем бота.">ℹ️</span></button>
+            `;
+        } else if (node.type === 'condition') {
+            html = `
+                <div class="property-group">
+                    <label>Условие: <span class="tooltip-icon" data-tooltip="Выражение для проверки. Можно использовать переменные и операторы сравнения (==, !=, >, <, >=, <=)">ℹ️</span></label>
+                    <textarea id="nodeCondition" rows="3" placeholder='{{user_text}} == "999"'>${node.condition || ''}</textarea>
+                </div>
+                <div class="help-box">
+                    <div class="help-box-title">Примеры:</div>
+                    <div>• <code>{{user_text}} == "999"</code></div>
+                    <div>• <code>{{response.success}} == true</code></div>
+                    <div>• <code>{{contact_phone}} != "" && {{geo_latitude}} > 0</code></div>
+                </div>
+                <div class="property-group">
+                    <label>Доступные переменные:</label>
+                    <div class="variables-list">
+                        <code>{{user_text}}</code> — текст пользователя<br>
+                        <code>{{contact_phone}}</code> — телефон<br>
+                        <code>{{contact_name}}</code> — имя контакта<br>
+                        <code>{{geo_latitude}}</code> — широта<br>
+                        <code>{{geo_longitude}}</code> — долгота<br>
+                        <code>{{response}}</code> — полный ответ API (если предыдущий узел был API)<br>
+                        <code>{{*_переменные*}}</code> — переменные, извлеченные из API
+                    </div>
                 </div>
             `;
+        } else {
+            html = `
+                <div class="property-group">
+                    <label>Текст сообщения:</label>
+                    <textarea id="nodeText">${node.text}</textarea>
+                </div>
+                <div class="property-group">
+                    <label>
+                        <input type="checkbox" id="nodeCollectInput" ${node.collectInput ? 'checked' : ''}>
+                        Собирать текстовые сообщения от пользователя <span class="tooltip-icon" data-tooltip="Если включено, текстовое сообщение пользователя будет сохранено в переменную {{user_text}} для использования в следующих узлах">ℹ️</span>
+                    </label>
+                </div>
+            `;
+
+            if ((node.type === 'menu' || node.type === 'universal') && node.buttons) {
+                html += `
+                    <div class="property-group">
+                        <label>Кнопки: <span class="tooltip-icon" data-tooltip="Доступные типы: Callback, Ссылка, Открыть мини-приложение, Запросить контакт, Запросить геолокацию, Отправить сообщение">ℹ️</span></label>
+                        <div class="help-box">
+                            <div class="help-box-title">Типы кнопок:</div>
+                            <div>• <strong>Callback</strong> — обычная кнопка с переходом по клику</div>
+                            <div>• <strong>Ссылка</strong> — открывает URL в браузере</div>
+                            <div>• <strong>Открыть мини-приложение</strong> — открывает mini app</div>
+                            <div>• <strong>Запросить контакт</strong> — сохраняет контакт в {{contact_phone}}, {{contact_name}}</div>
+                            <div>• <strong>Запросить геолокацию</strong> — сохраняет координаты в {{geo_latitude}}, {{geo_longitude}}</div>
+                            <div>• <strong>Отправить сообщение</strong> — отправляет текст как ответ</div>
+                        </div>
+                        <div id="buttonsList"></div>
+                        <button class="btn btn-add" onclick="flowEditor.addButton('${node.id}')">+ Добавить кнопку</button>
+                    </div>
+                `;
+            }
         }
 
         this.nodeProperties.innerHTML = html;
 
-        const textArea = document.getElementById('nodeText');
-        textArea.addEventListener('input', (e) => {
-            this.updateNode(node.id, { text: e.target.value });
-        });
+        this.setupNodePropertyListeners(node);
+    }
 
-        if (node.type === 'menu' || node.type === 'universal') {
-            this.renderButtonsList(node);
+    setupNodePropertyListeners(node) {
+        if (node.type === 'api_request') {
+            const apiMethod = document.getElementById('apiMethod');
+            const apiUrl = document.getElementById('apiUrl');
+            const apiBody = document.getElementById('apiBody');
+
+            if (apiMethod) {
+                apiMethod.addEventListener('change', (e) => {
+                    this.updateNode(node.id, { method: e.target.value });
+                });
+            }
+            if (apiUrl) {
+                apiUrl.addEventListener('input', (e) => {
+                    this.updateNode(node.id, { url: e.target.value });
+                });
+            }
+            if (apiBody) {
+                apiBody.addEventListener('input', (e) => {
+                    this.updateNode(node.id, { body: e.target.value });
+                });
+            }
+
+            document.querySelectorAll('.btn-remove-header').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const nodeId = e.target.dataset.nodeId;
+                    const index = parseInt(e.target.dataset.index);
+                    this.removeHeader(nodeId, index);
+                });
+            });
+
+            document.querySelectorAll('.btn-remove-extract').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const nodeId = e.target.dataset.nodeId;
+                    const index = parseInt(e.target.dataset.index);
+                    this.removeExtractVar(nodeId, index);
+                });
+            });
+
+            document.getElementById('btnAddHeader').addEventListener('click', (e) => {
+                e.preventDefault();
+                const nodeId = e.target.dataset.nodeId;
+                this.addHeader(nodeId);
+            });
+
+            document.getElementById('btnAddExtractVar').addEventListener('click', (e) => {
+                e.preventDefault();
+                const nodeId = e.target.dataset.nodeId;
+                this.addExtractVar(nodeId);
+            });
+
+            document.querySelectorAll('.header-key-input').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    this.updateHeader(node.id, parseInt(e.target.dataset.index), 'key', e.target.value);
+                });
+            });
+            document.querySelectorAll('.header-value-input').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    this.updateHeader(node.id, parseInt(e.target.dataset.index), 'value', e.target.value);
+                });
+            });
+
+            document.querySelectorAll('.extract-field-input').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    this.updateExtractVar(node.id, parseInt(e.target.dataset.index), 'field', e.target.value);
+                });
+            });
+            document.querySelectorAll('.extract-var-input').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    this.updateExtractVar(node.id, parseInt(e.target.dataset.index), 'var', e.target.value);
+                });
+            });
+        } else if (node.type === 'condition') {
+            const nodeCondition = document.getElementById('nodeCondition');
+            if (nodeCondition) {
+                nodeCondition.addEventListener('input', (e) => {
+                    this.updateNode(node.id, { condition: e.target.value });
+                });
+            }
+        } else {
+            const textArea = document.getElementById('nodeText');
+            if (textArea) {
+                textArea.addEventListener('input', (e) => {
+                    this.updateNode(node.id, { text: e.target.value });
+                });
+            }
+
+            const collectInput = document.getElementById('nodeCollectInput');
+            if (collectInput) {
+                collectInput.addEventListener('change', (e) => {
+                    this.updateNode(node.id, { collectInput: e.target.checked });
+                });
+            }
+
+            if (node.type === 'menu' || node.type === 'universal') {
+                this.renderButtonsList(node);
+            }
+        }
+    }
+
+    parseHeaders(headersStr) {
+        try {
+            const parsed = JSON.parse(headersStr);
+            if (Array.isArray(parsed)) {
+                return parsed;
+            } else if (typeof parsed === 'object') {
+                return Object.keys(parsed).map(key => ({ key, value: parsed[key] }));
+            }
+            return [{ key: 'Content-Type', value: 'application/json' }];
+        } catch {
+            return [{ key: 'Content-Type', value: 'application/json' }];
+        }
+    }
+
+    addHeader(nodeId) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const headersData = this.parseHeaders(node.headers || '{}');
+        headersData.push({ key: '', value: '' });
+
+        this.updateNode(nodeId, { headers: JSON.stringify(headersData) });
+        this.showNodeProperties(node);
+    }
+
+    removeHeader(nodeId, index) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const headersData = this.parseHeaders(node.headers || '{}');
+        headersData.splice(index, 1);
+
+        this.updateNode(nodeId, { headers: JSON.stringify(headersData) });
+        this.showNodeProperties(node);
+    }
+
+    updateHeader(nodeId, index, field, value) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const headersData = this.parseHeaders(node.headers || '{}');
+        headersData[index][field] = value;
+
+        this.updateNode(nodeId, { headers: JSON.stringify(headersData) });
+    }
+
+    addExtractVar(nodeId) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const extractVars = JSON.parse(node.extractVars || '[]');
+        extractVars.push({ field: '', var: '' });
+
+        this.updateNode(nodeId, { extractVars: JSON.stringify(extractVars) });
+        this.showNodeProperties(node);
+    }
+
+    removeExtractVar(nodeId, index) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const extractVars = JSON.parse(node.extractVars || '[]');
+        extractVars.splice(index, 1);
+
+        this.updateNode(nodeId, { extractVars: JSON.stringify(extractVars) });
+        this.showNodeProperties(node);
+    }
+
+    updateExtractVar(nodeId, index, field, value) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const extractVars = JSON.parse(node.extractVars || '[]');
+        extractVars[index][field] = value;
+
+        this.updateNode(nodeId, { extractVars: JSON.stringify(extractVars) });
+    }
+
+    async testApiRequest(nodeId) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        try {
+            const method = document.getElementById('apiMethod').value;
+            const url = document.getElementById('apiUrl').value;
+            const headersData = this.parseHeaders(node.headers || '{}');
+            const headersObj = {};
+            headersData.forEach(h => {
+                if (h.key) headersObj[h.key] = h.value;
+            });
+            const bodyStr = document.getElementById('apiBody').value;
+
+            const options = {
+                method: method,
+                headers: headersObj
+            };
+
+            if (method !== 'GET' && method !== 'HEAD') {
+                try {
+                    options.body = JSON.parse(bodyStr);
+                } catch {
+                    options.body = bodyStr;
+                }
+            }
+
+            const response = await fetch(url, options);
+            const result = await response.text();
+
+            alert(`Статус: ${response.status}\n\nОтвет:\n${result.substring(0, 500)}`);
+        } catch (error) {
+            alert(`Ошибка: ${error.message}`);
         }
     }
     
@@ -536,18 +883,35 @@ class FlowEditor {
 
         this.nodesContainer.innerHTML = this.nodes.map(node => {
             const isDisconnected = !node.isStart && disconnectedIds.has(node.id);
-            const nodeTypeClass = node.type === 'universal' ? 'message' : node.type;
+            let nodeTypeClass = node.type;
+            if (node.type === 'universal') nodeTypeClass = 'message';
+
+            let icon = '';
+            if (node.isStart) icon = '🚀 Начало';
+            else if (node.type === 'message' || node.type === 'universal') icon = '💬 Элемент';
+            else if (node.type === 'api_request') icon = '🌐 API Запрос';
+            else if (node.type === 'condition') icon = '🔀 Условие';
+
+            let content = '';
+            if (node.type === 'api_request') {
+                content = `<div class="node-text">${node.method} ${this.escapeHtml(node.url).substring(0, 40)}...</div>`;
+            } else if (node.type === 'condition') {
+                content = `<div class="node-text">${this.escapeHtml(node.condition)}</div>`;
+            } else {
+                content = `<div class="node-text">${this.escapeHtml(node.text).replace(/\n/g, '<br>')}</div>`;
+            }
+
             return `
             <div class="node node-${nodeTypeClass} ${this.selectedNode === node.id ? 'selected' : ''} ${isDisconnected ? 'disconnected' : ''}"
                  data-id="${node.id}"
                  data-node-connectable="true"
                  style="left: ${node.x}px; top: ${node.y}px;">
                 <div class="node-header">
-                    <span>${node.isStart ? '🚀 Начало' : (node.type === 'message' || node.type === 'universal' ? '💬 Элемент' : '🎯 Элемент')}</span>
-                    ${!node.isStart ? '<button class="delete-btn">🗑️</button>' : ''}
+                    <span>${icon}</span>
+                    ${!node.isStart ? '<button class="delete-btn" data-delete-node="true">🗑️</button>' : ''}
                 </div>
                 <div class="node-content">
-                    <div class="node-text">${this.escapeHtml(node.text).replace(/\n/g, '<br>')}</div>
+                    ${content}
                     ${node.buttons && node.buttons.length > 0 ? `
                         <div class="node-buttons">
                             ${node.buttons.map(btn => `
@@ -567,11 +931,32 @@ class FlowEditor {
         this.connectionsSvg.style.transform = `translate(${this.offset.x}px, ${this.offset.y}px) scale(${this.scale})`;
     }
 
+    attachNodeEventListeners() {
+        console.log('=== ATTACH NODE EVENT LISTENERS ===');
+        this.nodesContainer.querySelectorAll('[data-delete-node="true"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                console.log('Delete button clicked!');
+                e.preventDefault();
+                e.stopPropagation();
+                const nodeEl = e.target.closest('.node');
+                if (nodeEl) {
+                    this.deleteNode(nodeEl.dataset.id);
+                }
+            });
+        });
+    }
+
     renderConnections() {
         let svg = `
             <defs>
                 <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
                     <polygon points="0 0, 10 3.5, 0 7" fill="#95a5a6"/>
+                </marker>
+                <marker id="arrowhead-success" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="#38ef7d"/>
+                </marker>
+                <marker id="arrowhead-error" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="#e74c3c"/>
                 </marker>
             </defs>
         `;
@@ -579,28 +964,55 @@ class FlowEditor {
         this.connections.forEach(conn => {
             const path = this.calculateConnectionPath(conn);
             if (path) {
-                svg += `<path class="connection-line" d="${path}" />`;
-                
                 const fromNode = this.nodes.find(n => n.id === conn.from);
                 const toNode = this.nodes.find(n => n.id === conn.to);
-                if (fromNode && fromNode.buttons && toNode) {
+
+                let stroke = '#95a5a6';
+                let marker = 'url(#arrowhead)';
+
+                if (conn.type === 'success') {
+                    stroke = '#38ef7d';
+                    marker = 'url(#arrowhead-success)';
+                } else if (conn.type === 'error') {
+                    stroke = '#e74c3c';
+                    marker = 'url(#arrowhead-error)';
+                } else if (conn.type === 'true') {
+                    stroke = '#38ef7d';
+                    marker = 'url(#arrowhead-success)';
+                } else if (conn.type === 'false') {
+                    stroke = '#e74c3c';
+                    marker = 'url(#arrowhead-error)';
+                }
+
+                svg += `<path class="connection-line" d="${path}" style="stroke: ${stroke}; marker-end: ${marker};" />`;
+
+                let label = '';
+                let startX = fromNode.x + 250;
+                let startY = fromNode.y + 50;
+                const endX = toNode.x;
+                const endY = toNode.y + 50;
+
+                if (conn.buttonId && fromNode.buttons) {
                     const button = fromNode.buttons.find(b => b.id === conn.buttonId);
                     if (button) {
-                        let startY = fromNode.y + 50;
                         const btnIndex = fromNode.buttons.findIndex(b => b.id === conn.buttonId);
                         if (btnIndex !== -1) {
                             startY = fromNode.y + 70 + (btnIndex * 35);
                         }
-                        
-                        const startX = fromNode.x + 250;
-                        const endX = toNode.x;
-                        const endY = toNode.y + 50;
-                        
-                        const midX = (startX + endX) / 2;
-                        const midY = (startY + endY) / 2;
-                        
-                        svg += `<text class="connection-label" x="${midX}" y="${midY}" text-anchor="middle">${this.escapeHtml(button.text)}</text>`;
+                        label = button.text;
                     }
+                } else {
+                    startY = fromNode.y + 50;
+                    if (conn.type === 'success') label = '✅ Success';
+                    else if (conn.type === 'error') label = '❌ Error';
+                    else if (conn.type === 'true') label = '✓ True';
+                    else if (conn.type === 'false') label = '✗ False';
+                }
+
+                if (label) {
+                    const midX = (startX + endX) / 2;
+                    const midY = (startY + endY) / 2;
+                    svg += `<text class="connection-label" x="${midX}" y="${midY}" text-anchor="middle">${this.escapeHtml(label)}</text>`;
                 }
             }
         });
@@ -777,6 +1189,22 @@ class FlowEditor {
 
 function addElement() {
     flowEditor.addUniversalElement();
+}
+
+function addMenuNode() {
+    flowEditor.addUniversalElement();
+}
+
+function addMenuNode() {
+    flowEditor.addUniversalElement();
+}
+
+function addApiNode() {
+    flowEditor.addApiNode();
+}
+
+function addConditionNode() {
+    flowEditor.addConditionNode();
 }
 
 function saveFlow() {
