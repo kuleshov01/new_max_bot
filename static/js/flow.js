@@ -641,16 +641,7 @@ class FlowEditor {
             if ((node.type === 'menu' || node.type === 'universal') && node.buttons) {
                 html += `
                     <div class="property-group">
-                        <label>Кнопки: <span class="tooltip-icon" data-tooltip="Доступные типы: Callback, Ссылка, Открыть мини-приложение, Запросить контакт, Запросить геолокацию, Отправить сообщение">ℹ️</span></label>
-                        <div class="help-box">
-                            <div class="help-box-title">Типы кнопок:</div>
-                            <div>• <strong>Callback</strong> — обычная кнопка с переходом по клику</div>
-                            <div>• <strong>Ссылка</strong> — открывает URL в браузере</div>
-                            <div>• <strong>Открыть мини-приложение</strong> — открывает mini app</div>
-                            <div>• <strong>Запросить контакт</strong> — сохраняет контакт в {{contact_phone}}, {{contact_name}}</div>
-                            <div>• <strong>Запросить геолокацию</strong> — сохраняет координаты в {{geo_latitude}}, {{geo_longitude}}</div>
-                            <div>• <strong>Отправить сообщение</strong> — отправляет текст как ответ</div>
-                        </div>
+                        <label>Кнопки:</label>
                         <div id="buttonsList"></div>
                         <button class="btn btn-add" onclick="flowEditor.addButton('${node.id}')">+ Добавить кнопку</button>
                     </div>
@@ -769,6 +760,18 @@ class FlowEditor {
 
             if (node.type === 'menu' || node.type === 'universal') {
                 this.renderButtonsList(node);
+
+                document.querySelectorAll('.button-type-input').forEach(select => {
+                    select.addEventListener('change', (e) => {
+                        this.updateButtonType(node.id, parseInt(e.target.dataset.index), e.target.value);
+                    });
+                });
+
+                document.querySelectorAll('.button-url-input').forEach(input => {
+                    input.addEventListener('input', (e) => {
+                        this.updateButtonUrl(node.id, parseInt(e.target.dataset.index), e.target.value);
+                    });
+                });
             }
         }
     }
@@ -894,6 +897,15 @@ class FlowEditor {
         list.innerHTML = node.buttons.map((btn, index) => `
             <div class="button-item">
                 <input type="text" class="button-text-input" data-index="${index}" value="${btn.text}" onchange="flowEditor.updateButtonText('${node.id}', ${index}, this.value)">
+                <select class="button-type-input" data-index="${index}" onchange="flowEditor.updateButtonType('${node.id}', ${index}, this.value)">
+                    <option value="callback" ${btn.type === 'callback' ? 'selected' : ''}>Callback</option>
+                    <option value="link" ${btn.type === 'link' ? 'selected' : ''}>Ссылка</option>
+                    <option value="web_app" ${btn.type === 'web_app' ? 'selected' : ''}>Мини-приложение</option>
+                    <option value="request_contact" ${btn.type === 'request_contact' ? 'selected' : ''}>Запросить контакт</option>
+                    <option value="request_location" ${btn.type === 'request_location' ? 'selected' : ''}>Запросить геолокацию</option>
+                    <option value="message" ${btn.type === 'message' ? 'selected' : ''}>Отправить сообщение</option>
+                </select>
+                ${btn.type === 'link' || btn.type === 'web_app' ? `<input type="text" class="button-url-input" data-index="${index}" value="${btn.url || ''}" placeholder="${btn.type === 'link' ? 'URL ссылки' : 'ID мини-приложения'}" onchange="flowEditor.updateButtonUrl('${node.id}', ${index}, this.value)">` : ''}
                 <button class="remove-button" onclick="flowEditor.removeButton('${node.id}', ${index})">✕</button>
             </div>
         `).join('');
@@ -906,7 +918,10 @@ class FlowEditor {
             node.buttons.push({
                 id: buttonId,
                 text: `Кнопка ${node.buttons.length + 1}`,
-                nextNodeId: null
+                nextNodeId: null,
+                type: 'callback',
+                url: '',
+                appId: ''
             });
             this.render();
             this.showNodeProperties(node);
@@ -929,6 +944,22 @@ class FlowEditor {
         if (node && node.buttons && node.buttons[buttonIndex]) {
             node.buttons[buttonIndex].text = text;
             this.render();
+        }
+    }
+
+    updateButtonType(nodeId, buttonIndex, type) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (node && node.buttons && node.buttons[buttonIndex]) {
+            node.buttons[buttonIndex].type = type;
+            this.render();
+            this.showNodeProperties(node);
+        }
+    }
+
+    updateButtonUrl(nodeId, buttonIndex, url) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (node && node.buttons && node.buttons[buttonIndex]) {
+            node.buttons[buttonIndex].url = url;
         }
     }
     
