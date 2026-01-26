@@ -13,6 +13,7 @@ class FlowEditor {
         this.lastMousePos = { x: 0, y: 0 };
         this.currentBotId = null;
         this.mode = 'edit';
+        this.DEBUG_ENABLED = false;
 
         this.init();
     }
@@ -23,16 +24,17 @@ class FlowEditor {
         this.connectionsSvg = document.getElementById('connections');
         this.nodeProperties = document.getElementById('nodeProperties');
         this.botSelect = document.getElementById('botSelect');
-        
+
         this.setupEventListeners();
         this.loadBotFromUrl();
         this.loadBots();
-        
+
         if (!this.currentBotId) {
             this.createStartNode();
         }
         this.render();
     }
+
     
     loadBotFromUrl() {
         const urlParams = new URLSearchParams(window.location.search);
@@ -1210,7 +1212,11 @@ class FlowEditor {
         });
 
         this.nodes.forEach(node => {
-            if (!node.isStart && !connectedNodeIds.has(node.id) && !nodeIdWithOutgoing.has(node.id)) {
+            const hasIncomingConnection = connectedNodeIds.has(node.id);
+            const hasOutgoingConnection = nodeIdWithOutgoing.has(node.id);
+            const isConnected = hasIncomingConnection || hasOutgoingConnection;
+
+            if (!node.isStart && !isConnected) {
                 disconnectedNodes.push(node.id);
             }
 
@@ -1226,7 +1232,8 @@ class FlowEditor {
                     if (!hasError) errorMessage += ' Отсутствует Error соединение.';
                     apiNodeErrors.push(errorMessage);
                 } else if (node.ignoreError && !hasSuccess) {
-                    apiNodeErrors.push(`API узел "${node.url ? node.url.substring(0, 30) + '...' : 'Без URL'}" требует подключения Success соединения.`);
+                    const errorMessage = `API узел "${node.url ? node.url.substring(0, 30) + '...' : 'Без URL'}" требует подключения Success соединения.`;
+                    apiNodeErrors.push(errorMessage);
                 }
             }
             // Check condition nodes for required connections
@@ -1236,7 +1243,71 @@ class FlowEditor {
                 const hasFalse = conditionConnections.some(c => c.type === 'false');
 
                 if (!hasTrue || !hasFalse) {
-                    let errorMessage = `Условный узел "${node.condition ? node.condition.substring(0, 30) + '...' : 'Без условия'}" требует подключения True и False.`;
+                    let errorMessage = `Условный узел "${node.condition !== undefined && node.condition !== null ? node.condition.substring(0, 30) + '...' : 'Без условия'}" требует подключения True и False.`;
+                    if (!hasTrue) errorMessage += ' Отсутствует True соединение.';
+                    if (!hasFalse) errorMessage += ' Отсутствует False соединение.';
+                    conditionNodeErrors.push(errorMessage);
+                }
+            }
+        });
+
+        return {
+            valid: disconnectedNodes.length === 0 && apiNodeErrors.length === 0 && conditionNodeErrors.length === 0,
+            disconnected: disconnectedNodes,
+            apiErrors: apiNodeErrors,
+            conditionErrors: conditionNodeErrors
+        };
+    }
+
+    // Original version without debug output for other potential calls
+    validateConnectivityOriginal() {
+        const disconnectedNodes = [];
+        const connectedNodeIds = new Set();
+        const nodeIdWithOutgoing = new Set();
+        const apiNodeErrors = [];
+        const conditionNodeErrors = [];
+
+        if (this.nodes.length === 0) return { valid: true, disconnected: [], apiErrors: [], conditionErrors: [] };
+
+        connectedNodeIds.add('start');
+
+        this.connections.forEach(conn => {
+            connectedNodeIds.add(conn.to);
+            nodeIdWithOutgoing.add(conn.from);
+        });
+
+        this.nodes.forEach(node => {
+            const hasIncomingConnection = connectedNodeIds.has(node.id);
+            const hasOutgoingConnection = nodeIdWithOutgoing.has(node.id);
+            const isConnected = hasIncomingConnection || hasOutgoingConnection;
+
+            if (!node.isStart && !isConnected) {
+                disconnectedNodes.push(node.id);
+            }
+
+            // Check API nodes for required connections
+            if (node.type === 'api_request') {
+                const apiConnections = this.connections.filter(c => c.from === node.id);
+                const hasSuccess = apiConnections.some(c => c.type === 'success');
+                const hasError = apiConnections.some(c => c.type === 'error');
+
+                if (!node.ignoreError && (!hasSuccess || !hasError)) {
+                    let errorMessage = `API узел "${node.url && typeof node.url === 'string' ? node.url.substring(0, 30) + '...' : 'Без URL'}" требует подключения как минимум Success и Error.`;
+                    if (!hasSuccess) errorMessage += ' Отсутствует Success соединение.';
+                    if (!hasError) errorMessage += ' Отсутствует Error соединение.';
+                    apiNodeErrors.push(errorMessage);
+                } else if (node.ignoreError && !hasSuccess) {
+                    apiNodeErrors.push(`API узел "${node.url && typeof node.url === 'string' ? node.url.substring(0, 30) + '...' : 'Без URL'}" требует подключения Success соединения.`);
+                }
+            }
+            // Check condition nodes for required connections
+            else if (node.type === 'condition') {
+                const conditionConnections = this.connections.filter(c => c.from === node.id);
+                const hasTrue = conditionConnections.some(c => c.type === 'true');
+                const hasFalse = conditionConnections.some(c => c.type === 'false');
+
+                if (!hasTrue || !hasFalse) {
+                    let errorMessage = `Условный узел "${node.condition !== undefined && node.condition !== null && typeof node.condition === 'string' ? node.condition.substring(0, 30) + '...' : 'Без условия'}" требует подключения True и False.`;
                     if (!hasTrue) errorMessage += ' Отсутствует True соединение.';
                     if (!hasFalse) errorMessage += ' Отсутствует False соединение.';
                     conditionNodeErrors.push(errorMessage);
@@ -1276,10 +1347,11 @@ class FlowEditor {
         });
     }
 
+
     async saveFlow() {
         this.syncConnections();
 
-        const validation = this.validateConnectivity();
+        const validation = this.validateConnectivityOriginal(); // Use the safe version
 
         if (!validation.valid) {
             let errorMessage = "Невозможно сохранить! ";
@@ -1287,7 +1359,7 @@ class FlowEditor {
             if (validation.disconnected.length > 0) {
                 const nodeNames = validation.disconnected.map(id => {
                     const node = this.nodes.find(n => n.id === id);
-                    return node ? node.text.substring(0, 20) + '...' : id;
+                    return node ? (node.text && typeof node.text === 'string' ? node.text.substring(0, 20) + '...' : (node.condition && typeof node.condition === 'string' ? node.condition.substring(0, 20) + '...' : node.type + '...')) : id;
                 }).join(', ');
                 errorMessage += `Существуют несвязанные элементы:\n\n${nodeNames}\n\n`;
             }
@@ -1334,7 +1406,7 @@ class FlowEditor {
             }
         } catch (error) {
             console.error('Error saving flow:', error);
-            alert('Ошибка при сохранении диалога');
+            alert('Ошибка при сохранении диалога: ' + error.message);
         }
     }
     
@@ -1412,4 +1484,77 @@ function setMode(mode) {
 let flowEditor;
 document.addEventListener('DOMContentLoaded', () => {
     flowEditor = new FlowEditor();
+});
+
+// Global function to toggle debug mode
+function toggleDebug() {
+    const debugDiv = document.getElementById('debug-info');
+
+    if (debugDiv) {
+        // Toggle visibility of existing debug div
+        if (debugDiv.style.display === 'none' || debugDiv.style.display === '') {
+            debugDiv.style.display = 'block';
+            alert('Отладочное окно показано');
+        } else {
+            debugDiv.style.display = 'none';
+            alert('Отладочное окно скрыто');
+        }
+    } else {
+        // Create debug div if it doesn't exist
+        const newDebugDiv = document.createElement('div');
+        newDebugDiv.id = 'debug-info';
+        newDebugDiv.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            width: 300px;
+            max-height: 300px;
+            background: #fff;
+            border: 2px solid #ff0000;
+            border-radius: 5px;
+            padding: 10px;
+            z-index: 10000;
+            overflow-y: auto;
+            font-size: 12px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        `;
+        newDebugDiv.innerHTML = '<h4 style="margin:0 0 5px 0; color: red;">DEBUG INFO: <button onclick="toggleDebug()" style="float:right; background:#ffcccc; border:1px solid #cc0000; padding:2px 5px; cursor:pointer;">X</button></h4>';
+        document.body.appendChild(newDebugDiv);
+        alert('Отладочное окно создано и показано');
+    }
+}
+
+// Create debug toggle button in the UI
+function createDebugToggleButton() {
+    const debugButton = document.createElement('button');
+    debugButton.id = 'debug-toggle-button';
+    debugButton.textContent = 'DBG';
+    debugButton.style.cssText = `
+        position: fixed;
+        top: 10px;
+        right: 320px;
+        width: 40px;
+        height: 30px;
+        background: #f8f9fa;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: bold;
+        color: #495057;
+        z-index: 10001;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        transition: all 0.3s;
+    `;
+
+    debugButton.title = 'Включить/выключить отладочное окно';
+
+    debugButton.addEventListener('click', toggleDebug);
+
+    document.body.appendChild(debugButton);
+}
+
+// Initialize the debug toggle button when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(createDebugToggleButton, 100); // Small delay to ensure DOM is fully loaded
 });
