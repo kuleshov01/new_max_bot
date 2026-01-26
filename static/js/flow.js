@@ -318,8 +318,29 @@ class FlowEditor {
         const y = (e.clientY - rect.top - this.offset.y) / this.scale;
 
         if (this.mode === 'connect') {
+            // Handle condition connector clicks
+            if (e.target.closest('.condition-connector')) {
+                const connectorEl = e.target.closest('.condition-connector');
+                const connectionType = connectorEl.dataset.connectionType;
+                const nodeId = connectorEl.closest('.node').dataset.id;
+
+                this.draggedConnector = {
+                    type: 'condition',
+                    id: `${nodeId}_${connectionType}`,
+                    fromNode: nodeId,
+                    connectionType: connectionType
+                };
+                this.tempConnection = {
+                    startX: x,
+                    startY: y,
+                    endX: x,
+                    endY: y
+                };
+                e.stopPropagation();
+                return;
+            }
             // Handle API connector clicks
-            if (e.target.closest('.api-connector')) {
+            else if (e.target.closest('.api-connector')) {
                 const connectorEl = e.target.closest('.api-connector');
                 const connectionType = connectorEl.dataset.connectionType;
                 const nodeId = connectorEl.closest('.node').dataset.id;
@@ -366,9 +387,9 @@ class FlowEditor {
                     return;
                 }
 
-                // Prevent node connections for API nodes - they should only use API connectors
-                if (node && node.type === 'api_request') {
-                    // Don't allow general node connections for API nodes
+                // Prevent node connections for API and condition nodes - they should only use specific connectors
+                if (node && (node.type === 'api_request' || node.type === 'condition')) {
+                    // Don't allow general node connections for API and condition nodes
                     return;
                 }
 
@@ -448,6 +469,8 @@ class FlowEditor {
                     this.addNodeConnection(this.draggedConnector.id, toNodeId);
                 } else if (this.draggedConnector.type === 'api') {
                     this.addApiConnection(this.draggedConnector.fromNode, toNodeId, this.draggedConnector.connectionType);
+                } else if (this.draggedConnector.type === 'condition') {
+                    this.addConditionConnection(this.draggedConnector.fromNode, toNodeId, this.draggedConnector.connectionType);
                 }
             } else {
                 this.renderConnections();
@@ -1009,7 +1032,19 @@ class FlowEditor {
                             ` : ''}
                         </div>
                     ` : ''}
-                    ${isConnectMode && !node.isStart && node.type !== 'api_request' ? '<div class="node-connector-target" title="Перетащите для соединения"></div>' : ''}
+                    ${isConnectMode && node.type === 'condition' ? `
+                        <div class="condition-connection-options">
+                            <div class="condition-connector condition-true-connector" data-connection-type="true" title="Соединение при выполнении условия">
+                                <div class="connector-badge">✓</div>
+                                <span>True</span>
+                            </div>
+                            <div class="condition-connector condition-false-connector" data-connection-type="false" title="Соединение при невыполнении условия">
+                                <div class="connector-badge">✗</div>
+                                <span>False</span>
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${isConnectMode && !node.isStart && node.type !== 'api_request' && node.type !== 'condition' ? '<div class="node-connector-target" title="Перетащите для соединения"></div>' : ''}
                 </div>
             </div>
         `}).join('');
@@ -1163,8 +1198,9 @@ class FlowEditor {
         const connectedNodeIds = new Set();
         const nodeIdWithOutgoing = new Set();
         const apiNodeErrors = [];
+        const conditionNodeErrors = [];
 
-        if (this.nodes.length === 0) return { valid: true, disconnected: [], apiErrors: [] };
+        if (this.nodes.length === 0) return { valid: true, disconnected: [], apiErrors: [], conditionErrors: [] };
 
         connectedNodeIds.add('start');
 
@@ -1193,12 +1229,26 @@ class FlowEditor {
                     apiNodeErrors.push(`API узел "${node.url ? node.url.substring(0, 30) + '...' : 'Без URL'}" требует подключения Success соединения.`);
                 }
             }
+            // Check condition nodes for required connections
+            else if (node.type === 'condition') {
+                const conditionConnections = this.connections.filter(c => c.from === node.id);
+                const hasTrue = conditionConnections.some(c => c.type === 'true');
+                const hasFalse = conditionConnections.some(c => c.type === 'false');
+
+                if (!hasTrue || !hasFalse) {
+                    let errorMessage = `Условный узел "${node.condition ? node.condition.substring(0, 30) + '...' : 'Без условия'}" требует подключения True и False.`;
+                    if (!hasTrue) errorMessage += ' Отсутствует True соединение.';
+                    if (!hasFalse) errorMessage += ' Отсутствует False соединение.';
+                    conditionNodeErrors.push(errorMessage);
+                }
+            }
         });
 
         return {
-            valid: disconnectedNodes.length === 0 && apiNodeErrors.length === 0,
+            valid: disconnectedNodes.length === 0 && apiNodeErrors.length === 0 && conditionNodeErrors.length === 0,
             disconnected: disconnectedNodes,
-            apiErrors: apiNodeErrors
+            apiErrors: apiNodeErrors,
+            conditionErrors: conditionNodeErrors
         };
     }
 
@@ -1245,6 +1295,12 @@ class FlowEditor {
             if (validation.apiErrors.length > 0) {
                 errorMessage += "Проблемы с API узлами:\n\n";
                 errorMessage += validation.apiErrors.join('\n');
+                errorMessage += "\n\n";
+            }
+
+            if (validation.conditionErrors.length > 0) {
+                errorMessage += "Проблемы с условными узлами:\n\n";
+                errorMessage += validation.conditionErrors.join('\n');
                 errorMessage += "\n\n";
             }
 
@@ -1322,10 +1378,6 @@ class FlowEditor {
 }
 
 function addElement() {
-    flowEditor.addUniversalElement();
-}
-
-function addMenuNode() {
     flowEditor.addUniversalElement();
 }
 
