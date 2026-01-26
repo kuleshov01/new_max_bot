@@ -1496,10 +1496,10 @@ function toggleDebug() {
         debugDiv.id = 'debug-info';
         debugDiv.style.cssText = `
             position: fixed;
-            top: 10px;
+            top: 50px;
             right: 10px;
             width: 300px;
-            max-height: 400px;
+            max-height: calc(100vh - 70px);
             background: #fff;
             border: 2px solid #ff0000;
             border-radius: 5px;
@@ -1512,13 +1512,9 @@ function toggleDebug() {
         document.body.appendChild(debugDiv);
     }
 
-    // Toggle visibility and update content
-    if (debugDiv.style.display === 'none' || debugDiv.style.display === '') {
-        debugDiv.style.display = 'block';
-        updateDebugInfo();
-    } else {
-        debugDiv.style.display = 'none';
-    }
+    // Show the debug div and update content
+    debugDiv.style.display = 'block';
+    updateDebugInfo();
 }
 
 // Function to update debug information
@@ -1623,38 +1619,102 @@ setInterval(() => {
     }
 }, 1000); // Update every second
 
-// Create debug toggle button in the UI
+// Create debug toggle slider in the UI
 function createDebugToggleButton() {
-    const debugButton = document.createElement('button');
-    debugButton.id = 'debug-toggle-button';
-    debugButton.textContent = 'DBG';
-    debugButton.style.cssText = `
+    // Create container for the slider
+    const sliderContainer = document.createElement('div');
+    sliderContainer.id = 'debug-slider-container';
+    sliderContainer.style.cssText = `
         position: fixed;
         top: 10px;
-        right: 320px;
-        width: 40px;
-        height: 30px;
-        background: #f8f9fa;
-        border: 1px solid #ced4da;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: bold;
-        color: #495057;
-        z-index: 10001;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        transition: all 0.3s;
+        right: 10px;
+        z-index: 10002;
+        display: flex;
+        align-items: center;
     `;
 
-    debugButton.title = 'Включить/выключить отладочное окно';
+    // Create the slider switch
+    const sliderSwitch = document.createElement('label');
+    sliderSwitch.className = 'debug-toggle-switch';
+    sliderSwitch.style.cssText = `
+        position: relative;
+        display: inline-block;
+        width: 50px;
+        height: 26px;
+    `;
 
-    debugButton.addEventListener('click', () => {
-        toggleDebug();
-        // Also update debug info immediately when clicked
+    // Create the checkbox input
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = 'debug-toggle-checkbox';
+    checkbox.style.cssText = `
+        opacity: 0;
+        width: 0;
+        height: 0;
+    `;
+
+    // Create the slider element
+    const slider = document.createElement('span');
+    slider.className = 'debug-slider';
+    slider.style.cssText = `
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #ccc;
+        transition: .4s;
+        border-radius: 34px;
+    `;
+
+    // Add pseudo-element for the slider thumb
+    const sliderThumb = document.createElement('span');
+    sliderThumb.style.cssText = `
+        position: absolute;
+        content: "";
+        height: 20px;
+        width: 20px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+    `;
+
+    // Add debug label
+    const debugLabel = document.createElement('span');
+    debugLabel.textContent = 'DBG';
+    debugLabel.style.cssText = `
+        margin-right: 8px;
+        font-family: Arial, sans-serif;
+        font-size: 14px;
+        color: #333;
+        font-weight: bold;
+    `;
+
+    // Assemble the elements
+    slider.appendChild(sliderThumb);
+    sliderSwitch.appendChild(checkbox);
+    sliderSwitch.appendChild(slider);
+    sliderContainer.appendChild(debugLabel);
+    sliderContainer.appendChild(sliderSwitch);
+
+    // Add event listener to the checkbox
+    checkbox.addEventListener('change', function() {
+        if (this.checked) {
+            toggleDebug();
+        } else {
+            const debugDiv = document.getElementById('debug-info');
+            if (debugDiv) {
+                debugDiv.style.display = 'none';
+            }
+        }
+        // Update debug info immediately when toggled
         setTimeout(updateDebugInfo, 100);
     });
 
-    document.body.appendChild(debugButton);
+    document.body.appendChild(sliderContainer);
 }
 
 // Initialize the debug toggle button when DOM is loaded
