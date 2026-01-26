@@ -13,7 +13,7 @@ class FlowEditor {
         this.lastMousePos = { x: 0, y: 0 };
         this.currentBotId = null;
         this.mode = 'edit';
-        this.DEBUG_ENABLED = false;
+        this.DEBUG_ENABLED = true;
 
         this.init();
     }
@@ -1488,27 +1488,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Global function to toggle debug mode
 function toggleDebug() {
-    const debugDiv = document.getElementById('debug-info');
+    let debugDiv = document.getElementById('debug-info');
 
-    if (debugDiv) {
-        // Toggle visibility of existing debug div
-        if (debugDiv.style.display === 'none' || debugDiv.style.display === '') {
-            debugDiv.style.display = 'block';
-            alert('Отладочное окно показано');
-        } else {
-            debugDiv.style.display = 'none';
-            alert('Отладочное окно скрыто');
-        }
-    } else {
+    if (!debugDiv) {
         // Create debug div if it doesn't exist
-        const newDebugDiv = document.createElement('div');
-        newDebugDiv.id = 'debug-info';
-        newDebugDiv.style.cssText = `
+        debugDiv = document.createElement('div');
+        debugDiv.id = 'debug-info';
+        debugDiv.style.cssText = `
             position: fixed;
             top: 10px;
             right: 10px;
             width: 300px;
-            max-height: 300px;
+            max-height: 400px;
             background: #fff;
             border: 2px solid #ff0000;
             border-radius: 5px;
@@ -1518,11 +1509,119 @@ function toggleDebug() {
             font-size: 12px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         `;
-        newDebugDiv.innerHTML = '<h4 style="margin:0 0 5px 0; color: red;">DEBUG INFO: <button onclick="toggleDebug()" style="float:right; background:#ffcccc; border:1px solid #cc0000; padding:2px 5px; cursor:pointer;">X</button></h4>';
-        document.body.appendChild(newDebugDiv);
-        alert('Отладочное окно создано и показано');
+        document.body.appendChild(debugDiv);
+    }
+
+    // Toggle visibility and update content
+    if (debugDiv.style.display === 'none' || debugDiv.style.display === '') {
+        debugDiv.style.display = 'block';
+        updateDebugInfo();
+    } else {
+        debugDiv.style.display = 'none';
     }
 }
+
+// Function to update debug information
+function updateDebugInfo() {
+    const debugDiv = document.getElementById('debug-info');
+    if (!debugDiv || debugDiv.style.display === 'none') return;
+
+    if (typeof flowEditor !== 'undefined') {
+        const validation = flowEditor.validateConnectivityOriginal();
+
+        let debugContent = `
+            <h4 style="margin:0 0 10px 0; color: red; display:flex; justify-content:space-between; align-items:center;">
+                <span>DEBUG INFO</span>
+                <button onclick="toggleDebug()" style="background:#ffcccc; border:1px solid #cc0000; padding:2px 5px; cursor:pointer; margin-left:10px;">X</button>
+            </h4>
+
+            <div style="margin-bottom: 10px;">
+                <strong>Общая информация:</strong><br>
+                - Всего узлов: ${flowEditor.nodes.length}<br>
+                - Всего соединений: ${flowEditor.connections.length}<br>
+                - Текущий масштаб: ${(flowEditor.scale * 100).toFixed(0)}%<br>
+                - Смещение: X=${Math.round(flowEditor.offset.x)}, Y=${Math.round(flowEditor.offset.y)}<br>
+                - Выбранный узел: ${flowEditor.selectedNode || 'нет'}<br>
+                - Режим: ${flowEditor.mode}<br>
+                - Текущий бот ID: ${flowEditor.currentBotId || 'не выбран'}<br>
+            </div>
+
+            <div style="margin-bottom: 10px;">
+                <strong>Валидация:</strong><br>
+                - Валидно: ${validation.valid ? 'да' : 'нет'}<br>
+                - Отсоединённые узлы: ${validation.disconnected.length}<br>
+                - Ошибки API: ${validation.apiErrors.length}<br>
+                - Ошибки условий: ${validation.conditionErrors.length}<br>
+            </div>
+        `;
+
+        // Add list of nodes if there are any
+        if (flowEditor.nodes.length > 0) {
+            debugContent += `<div style="margin-bottom: 10px;"><strong>Узлы:</strong><br>`;
+            flowEditor.nodes.forEach(node => {
+                debugContent += `&bull; ${node.id} (${node.type}) - ${node.isStart ? 'START' : 'Regular'}<br>`;
+            });
+            debugContent += `</div>`;
+        }
+
+        // Add list of connections if there are any
+        if (flowEditor.connections.length > 0) {
+            debugContent += `<div style="margin-bottom: 10px;"><strong>Соединения:</strong><br>`;
+            flowEditor.connections.forEach(conn => {
+                let connDesc = `${conn.from} &rarr; ${conn.to}`;
+                if (conn.type) {
+                    connDesc += ` (${conn.type})`;
+                } else if (conn.buttonId) {
+                    connDesc += ` (button: ${conn.buttonId})`;
+                }
+                debugContent += `&bull; ${connDesc}<br>`;
+            });
+            debugContent += `</div>`;
+        }
+
+        // Add validation errors if any
+        if (!validation.valid) {
+            debugContent += `<div style="margin-bottom: 10px;"><strong>Ошибки валидации:</strong><br>`;
+            if (validation.disconnected.length > 0) {
+                debugContent += `<em>Отсоединенённые узлы:</em><br>`;
+                validation.disconnected.forEach(nodeId => {
+                    debugContent += `&bull; ${nodeId}<br>`;
+                });
+            }
+            if (validation.apiErrors.length > 0) {
+                debugContent += `<em>Ошибки API:</em><br>`;
+                validation.apiErrors.forEach(error => {
+                    debugContent += `&bull; ${error}<br>`;
+                });
+            }
+            if (validation.conditionErrors.length > 0) {
+                debugContent += `<em>Ошибки условий:</em><br>`;
+                validation.conditionErrors.forEach(error => {
+                    debugContent += `&bull; ${error}<br>`;
+                });
+            }
+            debugContent += `</div>`;
+        }
+
+        debugDiv.innerHTML = debugContent;
+    } else {
+        debugDiv.innerHTML = `
+            <h4 style="margin:0 0 5px 0; color: red; display:flex; justify-content:space-between; align-items:center;">
+                <span>DEBUG INFO</span>
+                <button onclick="toggleDebug()" style="background:#ffcccc; border:1px solid #cc0000; padding:2px 5px; cursor:pointer; margin-left:10px;">X</button>
+            </h4>
+            <p>Объект flowEditor не найден</p>
+        `;
+    }
+}
+
+// Periodically update debug info if window is open
+setInterval(() => {
+    const debugDiv = document.getElementById('debug-info');
+    if (debugDiv && debugDiv.style.display !== 'none') {
+        updateDebugInfo();
+    }
+}, 1000); // Update every second
 
 // Create debug toggle button in the UI
 function createDebugToggleButton() {
@@ -1549,7 +1648,11 @@ function createDebugToggleButton() {
 
     debugButton.title = 'Включить/выключить отладочное окно';
 
-    debugButton.addEventListener('click', toggleDebug);
+    debugButton.addEventListener('click', () => {
+        toggleDebug();
+        // Also update debug info immediately when clicked
+        setTimeout(updateDebugInfo, 100);
+    });
 
     document.body.appendChild(debugButton);
 }
