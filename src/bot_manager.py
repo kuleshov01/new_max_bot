@@ -48,8 +48,9 @@ class BotInstance:
             params = {"access_token": self.bot_token}
             if marker:
                 params["marker"] = marker
+            # Уменьшаем таймаут до 30 секунд для более быстрого отклика (как в main.py)
             self.log('DEBUG', f'Запрос обновлений с параметрами: marker={marker}')
-            response = requests.get(url, params=params, timeout=60)
+            response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
             result = response.json()
             updates_count = len(result.get('updates', []))
@@ -64,7 +65,7 @@ class BotInstance:
         try:
             # Подставляем переменные в текст сообщения
             processed_text = self.replace_variables(chat_id, text)
-            
+
             url = f"{self.base_url}/messages?access_token={self.bot_token}&chat_id={chat_id}"
             headers = {"Content-Type": "application/json"}
             data = {"text": processed_text, "format": "markdown"}
@@ -76,7 +77,8 @@ class BotInstance:
                 if processed_attachments:
                     data["attachments"] = processed_attachments
             self.log('DEBUG', f'Отправка сообщения в чат {chat_id}: "{processed_text[:30]}..."')
-            response = requests.post(url, headers=headers, json=data, timeout=30)
+            # Уменьшаем таймаут для более быстрой отправки
+            response = requests.post(url, headers=headers, json=data, timeout=15)
             response.raise_for_status()
             self.log('INFO', f'Сообщение отправлено в чат {chat_id}')
             return response.json()
@@ -477,27 +479,30 @@ class BotInstance:
         new_marker = update.get("marker") or marker
         chat_id = self.extract_chat_id(update)
 
+        # Быстрая проверка - если нет chat_id, возвращаемся без обработки
+        if not chat_id:
+            return update.get("marker", marker)
+
         if update_type == "bot_started":
-            if chat_id:
-                self.log('DEBUG', f'Событие: bot_started, чат {chat_id}')
-                self.handle_message({"chat": {"id": chat_id}, "text": "/start"})
+            self.log('DEBUG', f'Событие: bot_started, чат {chat_id}')
+            self.handle_message({"chat": {"id": chat_id}, "text": "/start"})
 
         elif update_type == "message_created":
             msg = update.get("message") or {}
             body = msg.get("body", {})
             text = body.get("text", "").strip()
-            if chat_id:
-                # Полная структура сообщения для обработки
-                full_message = {
-                    "chat": {"id": chat_id},
-                    "text": text,
-                    "body": body
-                }
-                
-                if text:
-                    self.log('DEBUG', f'Событие: message_created, чат {chat_id}, текст: "{text[:20]}"')
-                
-                self.handle_message(full_message)
+
+            # Полная структура сообщения для обработки
+            full_message = {
+                "chat": {"id": chat_id},
+                "text": text,
+                "body": body
+            }
+
+            if text:
+                self.log('DEBUG', f'Событие: message_created, чат {chat_id}, текст: "{text[:20]}"')
+
+            self.handle_message(full_message)
 
         elif update_type == "message_callback":
             cb = update.get("callback") or {}
@@ -551,7 +556,9 @@ class BotInstance:
                         marker = self.process_update(update, marker)
                 if "marker" in updates:
                     marker = updates["marker"]
-                time.sleep(1)
+
+                # Уменьшаем задержку до 0.1 секунды для более быстрого отклика
+                time.sleep(0.1)
             except Exception as e:
                 self.log('ERROR', f'Ошибка в основном цикле: {e}')
                 time.sleep(5)
