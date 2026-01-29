@@ -1,11 +1,24 @@
 import sqlite3
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
-DB_FILE = '/storage/self/primary/Project/new_max_bot/data/db/bots_data.db'
+# Определяем базовую директорию проекта (директория, содержащая src/)
+BASE_DIR = Path(__file__).parent.parent
+DB_FILE = str(BASE_DIR / 'data' / 'db' / 'bots_data.db')
+LOGS_DIR = str(BASE_DIR / 'data' / 'logs')
+
+def ensure_directories():
+    """Создаёт необходимые директории, если они не существуют"""
+    db_dir = os.path.dirname(DB_FILE)
+    os.makedirs(db_dir, exist_ok=True)
+    os.makedirs(LOGS_DIR, exist_ok=True)
 
 def init_db():
+    # Убеждаемся, что директории существуют
+    ensure_directories()
+    
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
