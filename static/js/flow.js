@@ -14,6 +14,10 @@ class FlowEditor {
         this.currentBotId = null;
         this.mode = 'edit';
         this.DEBUG_ENABLED = true;
+        this.resizingNode = null;
+        this.resizeHandle = null;
+        this.resizeStart = { x: 0, y: 0, width: 0, height: 0 };
+        this.currentEditingNodeId = null;
 
         this.init();
     }
@@ -32,6 +36,7 @@ class FlowEditor {
         if (!this.currentBotId) {
             this.createStartNode();
         }
+        this.updateZoomLevel();
         this.render();
     }
 
@@ -114,6 +119,7 @@ class FlowEditor {
             y: 100,
             text: '👋 Добро пожаловать!\n\nВыберите действие:',
             buttons: [],
+            format: 'html', // По умолчанию HTML
             isStart: true
         };
         this.nodes.push(startNode);
@@ -127,6 +133,7 @@ class FlowEditor {
             y: y,
             text: type === 'message' ? 'Введите сообщение...' : 'Выберите вариант:',
             buttons: [],
+            format: 'html', // По умолчанию HTML
             isStart: false
         };
 
@@ -154,6 +161,7 @@ class FlowEditor {
                 { id: `btn_${this.nodeIdCounter}_0`, text: 'Вариант 1', nextNodeId: null },
                 { id: `btn_${this.nodeIdCounter}_1`, text: 'Вариант 2', nextNodeId: null }
             ],
+            format: 'html', // По умолчанию HTML
             isStart: false
         };
 
@@ -317,6 +325,25 @@ class FlowEditor {
         this.render();
     }
 
+    addConditionConnection(fromNodeId, toNodeId, connectionType) {
+        // Remove any existing condition connections of the same type from this node
+        // But keep other types (e.g., keep 'false' when adding 'true')
+        this.connections = this.connections.filter(c =>
+            !(c.from === fromNodeId && c.type === connectionType)
+        );
+
+        if (toNodeId && fromNodeId && toNodeId !== fromNodeId) {
+            this.connections.push({
+                id: `conn_${this.nodeIdCounter++}`,
+                from: fromNodeId,
+                to: toNodeId,
+                type: connectionType  // 'true' or 'false'
+            });
+        }
+
+        this.render();
+    }
+
     findNodeIdByButton(buttonId) {
         for (const node of this.nodes) {
             if (node.buttons) {
@@ -334,6 +361,35 @@ class FlowEditor {
         const rect = this.canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left - this.offset.x) / this.scale;
         const y = (e.clientY - rect.top - this.offset.y) / this.scale;
+
+        // Handle resize
+        if (e.target.classList.contains('resize-handle')) {
+            const handleEl = e.target;
+            const nodeEl = handleEl.closest('.node');
+            const nodeId = nodeEl.dataset.id;
+            const node = this.nodes.find(n => n.id === nodeId);
+            
+            if (node) {
+                this.resizingNode = nodeId;
+                this.resizeHandle = handleEl.dataset.handle;
+                
+                // Получаем текущую высоту элемента, если она 'auto'
+                let currentHeight = node.height || 'auto';
+                if (currentHeight === 'auto' && nodeEl) {
+                    currentHeight = nodeEl.offsetHeight;
+                }
+                
+                this.resizeStart = {
+                    x: x,
+                    y: y,
+                    width: node.width || 250,
+                    height: currentHeight
+                };
+                nodeEl.classList.add('resizing');
+                e.stopPropagation();
+                return;
+            }
+        }
 
         if (this.mode === 'connect') {
             // Handle condition connector clicks
@@ -454,13 +510,43 @@ class FlowEditor {
         const x = (e.clientX - rect.left - this.offset.x) / this.scale;
         const y = (e.clientY - rect.top - this.offset.y) / this.scale;
         
-        if (this.draggedConnector) {
+        if (this.resizingNode) {
+            const node = this.nodes.find(n => n.id === this.resizingNode);
+            if (node) {
+                const dx = x - this.resizeStart.x;
+                const dy = y - this.resizeStart.y;
+                const handle = this.resizeHandle;
+                
+                let newWidth = this.resizeStart.width;
+                let newHeight = this.resizeStart.height;
+                
+                // Только вправо (e)
+                if (handle === 'e') {
+                    newWidth = Math.max(200, this.resizeStart.width + dx);
+                }
+                // Только вниз (s)
+                else if (handle === 's') {
+                    newHeight = Math.max(150, this.resizeStart.height + dy);
+                }
+                // Диагональ право-низ (se)
+                else if (handle === 'se') {
+                    newWidth = Math.max(200, this.resizeStart.width + dx);
+                    newHeight = Math.max(150, this.resizeStart.height + dy);
+                }
+                
+                node.width = newWidth;
+                node.height = newHeight;
+                
+                this.render();
+            }
+        } else if (this.draggedConnector) {
             this.tempConnection.endX = x;
             this.tempConnection.endY = y;
             this.renderConnections();
         } else if (this.draggedNode) {
             const node = this.nodes.find(n => n.id === this.draggedNode);
             if (node) {
+                // Убраны ограничения по перемещению элементов
                 node.x = x - this.dragOffset.x;
                 node.y = y - this.dragOffset.y;
                 this.render();
@@ -476,6 +562,16 @@ class FlowEditor {
     }
     
     handleCanvasMouseUp(e) {
+        if (this.resizingNode) {
+            const nodeEl = document.querySelector(`.node[data-id="${this.resizingNode}"]`);
+            if (nodeEl) {
+                nodeEl.classList.remove('resizing');
+            }
+            this.resizingNode = null;
+            this.resizeHandle = null;
+            this.render();
+        }
+        
         if (this.draggedConnector) {
             const target = e.target.closest('.node');
             if (target) {
@@ -506,7 +602,33 @@ class FlowEditor {
         const delta = e.deltaY > 0 ? 0.9 : 1.1;
         this.scale *= delta;
         this.scale = Math.min(Math.max(this.scale, 0.3), 3);
+        this.updateZoomLevel();
         this.render();
+    }
+    
+    zoomIn() {
+        this.scale = Math.min(this.scale * 1.2, 3);
+        this.updateZoomLevel();
+        this.render();
+    }
+    
+    zoomOut() {
+        this.scale = Math.max(this.scale / 1.2, 0.3);
+        this.updateZoomLevel();
+        this.render();
+    }
+    
+    zoomReset() {
+        this.scale = 1;
+        this.updateZoomLevel();
+        this.render();
+    }
+    
+    updateZoomLevel() {
+        const zoomLevelEl = document.getElementById('zoomLevel');
+        if (zoomLevelEl) {
+            zoomLevelEl.textContent = Math.round(this.scale * 100) + '%';
+        }
     }
     
     handleKeyDown(e) {
@@ -684,7 +806,10 @@ class FlowEditor {
             html = `
                 <div class="property-group">
                     <label>Текст сообщения:</label>
-                    <textarea id="nodeText">${node.text}</textarea>
+                    <div class="textarea-with-editor">
+                        <textarea id="nodeText">${node.text}</textarea>
+                        <button class="html-editor-btn" onclick="openHtmlEditor('${node.id}')">📝 Редактор</button>
+                    </div>
                 </div>
                 <div class="property-group">
                     <label>
@@ -826,6 +951,24 @@ class FlowEditor {
                 document.querySelectorAll('.button-url-input').forEach(input => {
                     input.addEventListener('input', (e) => {
                         this.updateButtonUrl(node.id, parseInt(e.target.dataset.index), e.target.value);
+                    });
+                });
+
+                document.querySelectorAll('.button-webapp-input').forEach(input => {
+                    input.addEventListener('input', (e) => {
+                        this.updateButtonWebAppUrl(node.id, parseInt(e.target.dataset.index), e.target.value);
+                    });
+                });
+
+                document.querySelectorAll('.button-contact-input').forEach(input => {
+                    input.addEventListener('input', (e) => {
+                        this.updateButtonContactId(node.id, parseInt(e.target.dataset.index), e.target.value);
+                    });
+                });
+
+                document.querySelectorAll('.button-payload-input').forEach(input => {
+                    input.addEventListener('input', (e) => {
+                        this.updateButtonPayload(node.id, parseInt(e.target.dataset.index), e.target.value);
                     });
                 });
             }
@@ -1014,17 +1157,24 @@ class FlowEditor {
         
         list.innerHTML = node.buttons.map((btn, index) => `
             <div class="button-item">
-                <input type="text" class="button-text-input" data-index="${index}" value="${btn.text}" onchange="flowEditor.updateButtonText('${node.id}', ${index}, this.value)">
+                <input type="text" class="button-text-input" data-index="${index}" value="${btn.text}" onchange="flowEditor.updateButtonText('${node.id}', ${index}, this.value)" placeholder="Текст кнопки">
                 <select class="button-type-input" data-index="${index}" onchange="flowEditor.updateButtonType('${node.id}', ${index}, this.value)">
                     <option value="callback" ${btn.type === 'callback' ? 'selected' : ''}>Callback</option>
                     <option value="link" ${btn.type === 'link' ? 'selected' : ''}>Ссылка</option>
-                    <option value="web_app" ${btn.type === 'web_app' ? 'selected' : ''}>Мини-приложение</option>
+                    <option value="open_app" ${btn.type === 'open_app' ? 'selected' : ''}>Мини-приложение</option>
                     <option value="request_contact" ${btn.type === 'request_contact' ? 'selected' : ''}>Запросить контакт</option>
                     <option value="request_location" ${btn.type === 'request_location' ? 'selected' : ''}>Запросить геолокацию</option>
                     <option value="message" ${btn.type === 'message' ? 'selected' : ''}>Отправить сообщение</option>
                 </select>
-                ${btn.type === 'link' || btn.type === 'web_app' ? `<input type="text" class="button-url-input" data-index="${index}" value="${btn.url || ''}" placeholder="${btn.type === 'link' ? 'URL ссылки' : 'ID мини-приложения'}" onchange="flowEditor.updateButtonUrl('${node.id}', ${index}, this.value)">` : ''}
-                <button class="remove-button" onclick="flowEditor.removeButton('${node.id}', ${index})">✕</button>
+                ${btn.type === 'link' ? `
+                    <input type="text" class="button-url-input" data-index="${index}" value="${btn.url || ''}" placeholder="URL ссылки (https://..., макс. 2048 символов)" onchange="flowEditor.updateButtonUrl('${node.id}', ${index}, this.value)">
+                ` : ''}
+                ${btn.type === 'open_app' ? `
+                    <input type="text" class="button-url-input button-webapp-input" data-index="${index}" value="${btn.webAppUrl || ''}" placeholder="Username бота или ссылка (например, @botname или https://max.ru/botname)" onchange="flowEditor.updateButtonWebAppUrl('${node.id}', ${index}, this.value)">
+                    <input type="text" class="button-contact-input" data-index="${index}" value="${btn.contactId || ''}" placeholder="ID бота (опционально)" onchange="flowEditor.updateButtonContactId('${node.id}', ${index}, this.value)">
+                    <input type="text" class="button-payload-input" data-index="${index}" value="${btn.payload || ''}" placeholder="Параметры запуска (опционально)" onchange="flowEditor.updateButtonPayload('${node.id}', ${index}, this.value)">
+                ` : ''}
+                <button class="remove-button" onclick="flowEditor.removeButton('${node.id}', ${index})">✕ Удалить</button>
             </div>
         `).join('');
     }
@@ -1039,7 +1189,9 @@ class FlowEditor {
                 nextNodeId: null,
                 type: 'callback',
                 url: '',
-                appId: ''
+                webAppUrl: '',
+                contactId: '',
+                payload: ''
             });
             this.render();
             this.showNodeProperties(node);
@@ -1078,6 +1230,27 @@ class FlowEditor {
         const node = this.nodes.find(n => n.id === nodeId);
         if (node && node.buttons && node.buttons[buttonIndex]) {
             node.buttons[buttonIndex].url = url;
+        }
+    }
+
+    updateButtonWebAppUrl(nodeId, buttonIndex, webAppUrl) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (node && node.buttons && node.buttons[buttonIndex]) {
+            node.buttons[buttonIndex].webAppUrl = webAppUrl;
+        }
+    }
+
+    updateButtonContactId(nodeId, buttonIndex, contactId) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (node && node.buttons && node.buttons[buttonIndex]) {
+            node.buttons[buttonIndex].contactId = contactId;
+        }
+    }
+
+    updateButtonPayload(nodeId, buttonIndex, payload) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (node && node.buttons && node.buttons[buttonIndex]) {
+            node.buttons[buttonIndex].payload = payload;
         }
     }
     
@@ -1141,6 +1314,8 @@ class FlowEditor {
             else if (node.type === 'transform') icon = '⚙️ Обработка данных';
 
             let content = '';
+            let isTextOverflow = false;
+            
             if (node.type === 'api_request') {
                 content = `<div class="node-text">${node.method} ${this.escapeHtml(node.url).substring(0, 40)}...</div>`;
             } else if (node.type === 'condition') {
@@ -1150,14 +1325,28 @@ class FlowEditor {
                 const count = transformations.length;
                 content = `<div class="node-text">${count} трансформаций</div>`;
             } else {
-                content = `<div class="node-text">${this.escapeHtml(node.text).replace(/\n/g, '<br>')}</div>`;
+                // Показываем отформатированный HTML (не экранированный)
+                const textContent = node.text || '';
+                const nodeWidth = node.width || 250;
+                
+                // Проверяем, превышает ли текст допустимую длину для текущего размера
+                const textLength = textContent.length;
+                const estimatedCharsPerLine = Math.floor(nodeWidth / 8); // Приблизительно 8 пикселей на символ
+                const estimatedLines = Math.ceil(textLength / estimatedCharsPerLine);
+                const maxLines = 5;
+                
+                isTextOverflow = estimatedLines > maxLines;
+                
+                content = `<div class="node-text ${isTextOverflow ? 'truncated' : ''}">${textContent}</div>`;
             }
+
+            const nodeStyle = `left: ${node.x}px; top: ${node.y}px;${node.width ? ` width: ${node.width}px;` : ''}${node.height && node.height !== 'auto' ? ` height: ${node.height}px;` : ''}`;
 
             return `
             <div class="node node-${nodeTypeClass} ${this.selectedNode === node.id ? 'selected' : ''} ${isDisconnected ? 'disconnected' : ''}"
                  data-id="${node.id}"
                  data-node-connectable="true"
-                 style="left: ${node.x}px; top: ${node.y}px;">
+                 style="${nodeStyle}">
                 <div class="node-header">
                     <span>${icon}</span>
                     ${!node.isStart ? '<button class="delete-btn" data-delete-node="true">🗑️</button>' : ''}
@@ -1202,6 +1391,10 @@ class FlowEditor {
                     ` : ''}
                     ${isConnectMode && !node.isStart && node.type !== 'api_request' && node.type !== 'condition' ? '<div class="node-connector-target" title="Перетащите для соединения"></div>' : ''}
                 </div>
+                <!-- Resize handles только для вправо, вниз и право-низ -->
+                <div class="resize-handle resize-handle-s" data-handle="s" title="Изменить размер вниз"></div>
+                <div class="resize-handle resize-handle-e" data-handle="e" title="Изменить размер вправо"></div>
+                <div class="resize-handle resize-handle-se" data-handle="se" title="Изменить размер по диагонали"></div>
             </div>
         `}).join('');
 
@@ -1639,6 +1832,24 @@ function setMode(mode) {
     flowEditor.setMode(mode);
 }
 
+function zoomIn() {
+    if (flowEditor) {
+        flowEditor.zoomIn();
+    }
+}
+
+function zoomOut() {
+    if (flowEditor) {
+        flowEditor.zoomOut();
+    }
+}
+
+function zoomReset() {
+    if (flowEditor) {
+        flowEditor.zoomReset();
+    }
+}
+
 let flowEditor;
 document.addEventListener('DOMContentLoaded', () => {
     flowEditor = new FlowEditor();
@@ -1656,47 +1867,113 @@ function initializeTooltips() {
         tooltip.className = 'custom-tooltip';
         tooltip.style.cssText = `
             position: fixed;
-            background: rgba(0, 0, 0, 0.9);
+            background: rgba(44, 62, 80, 0.98);
             color: white;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            z-index: 10000;
-            pointer-events: none;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            z-index: 999999;
             opacity: 0;
-            transition: opacity 0.3s;
-            max-width: 250px;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            max-width: 300px;
             word-wrap: break-word;
             white-space: normal;
+            line-height: 1.5;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            pointer-events: none;
         `;
         document.body.appendChild(tooltip);
     }
 
-    // Add mouse events to all tooltip icons
-    document.addEventListener('mouseover', function(e) {
+    let activeTooltipIcon = null;
+
+    // Add click event to all tooltip icons
+    document.addEventListener('click', function(e) {
         const tooltipIcon = e.target.closest('.tooltip-icon');
+        
         if (tooltipIcon) {
+            e.preventDefault();
+            e.stopPropagation();
+            
             const text = tooltipIcon.getAttribute('data-tooltip');
             if (text) {
-                tooltip.textContent = text;
-                tooltip.style.opacity = '1';
+                // Если кликнули на ту же иконку — скрываем tooltip
+                if (activeTooltipIcon === tooltipIcon) {
+                    hideTooltip();
+                    return;
+                }
+                
+                // Убираем активный класс с предыдущей иконки
+                if (activeTooltipIcon) {
+                    activeTooltipIcon.classList.remove('active');
+                }
+                
+                // Показываем tooltip рядом с иконкой
+                showTooltip(tooltipIcon, text);
+                activeTooltipIcon = tooltipIcon;
+                tooltipIcon.classList.add('active');
             }
+        } else if (!e.target.closest('.custom-tooltip')) {
+            // Скрываем tooltip при клике вне его
+            hideTooltip();
         }
     });
 
-    document.addEventListener('mousemove', function(e) {
-        if (tooltip.style.opacity === '1') {
-            tooltip.style.left = (e.pageX + 10) + 'px';
-            tooltip.style.top = (e.pageY - 30) + 'px';
+    function showTooltip(icon, text) {
+        tooltip.textContent = text;
+        tooltip.style.opacity = '1';
+        tooltip.style.visibility = 'visible';
+        
+        // Сначала показываем tooltip, чтобы получить его размеры
+        tooltip.style.display = 'block';
+        
+        // Позиционируем tooltip слева от иконки
+        const iconRect = icon.getBoundingClientRect();
+        const tooltipRect = tooltip.getBoundingClientRect();
+        
+        // Показываем слева от иконки
+        let left = iconRect.left - tooltipRect.width - 10;
+        let top = iconRect.top;
+        
+        // Проверяем, не уходит ли за левый край
+        if (left < 10) {
+            left = 10;
         }
-    });
+        
+        // Проверяем, не уходит ли за нижний край
+        if (top + tooltipRect.height > window.innerHeight - 20) {
+            top = window.innerHeight - tooltipRect.height - 20;
+        }
+        
+        // Проверяем, не уходит ли за верхний край
+        if (top < 10) {
+            top = 10;
+        }
+        
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = top + 'px';
+        tooltip.style.display = 'block';
+    }
 
-    document.addEventListener('mouseout', function(e) {
-        const tooltipIcon = e.target.closest('.tooltip-icon');
-        if (tooltipIcon) {
-            tooltip.style.opacity = '0';
+    function hideTooltip() {
+        tooltip.style.opacity = '0';
+        tooltip.style.visibility = 'hidden';
+        tooltip.style.display = 'none';
+        
+        // Убираем активный класс с иконки
+        if (activeTooltipIcon) {
+            activeTooltipIcon.classList.remove('active');
+            activeTooltipIcon = null;
         }
-    });
+    }
+
+    // Скрываем tooltip при ресайзе окна
+    window.addEventListener('resize', hideTooltip);
+    
+    // Скрываем tooltip при скролле
+    window.addEventListener('scroll', hideTooltip, true);
 }
 
 // Global function to toggle debug mode
@@ -1933,4 +2210,203 @@ function createDebugToggleButton() {
 // Initialize the debug toggle button when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(createDebugToggleButton, 100); // Small delay to ensure DOM is fully loaded
+});
+
+// ========== HTML Editor Functions ==========
+
+// Открыть HTML редактор
+function openHtmlEditor(nodeId) {
+    const modal = document.getElementById('htmlEditorModal');
+    const editorContent = document.getElementById('htmlEditorContent');
+    const editorCode = document.getElementById('htmlEditorCode');
+    
+    if (!modal || !editorContent || !editorCode) {
+        console.error('HTML editor elements not found');
+        return;
+    }
+    
+    // Получить текущий текст узла
+    const node = flowEditor.nodes.find(n => n.id === nodeId);
+    if (!node) {
+        console.error('Node not found:', nodeId);
+        return;
+    }
+    
+    flowEditor.currentEditingNodeId = nodeId;
+    
+    // Преобразовать простой текст в HTML для редактора
+    let htmlContent = node.text || '';
+    
+    // Если текст содержит HTML теги, используем как есть
+    if (htmlContent.includes('<') && htmlContent.includes('>')) {
+        // Проверяем, есть ли HTML теги
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = htmlContent;
+        if (tempDiv.children.length > 0 || htmlContent.match(/<[a-z][\s\S]*>/i)) {
+            // Это уже HTML
+            editorContent.innerHTML = htmlContent;
+        } else {
+            // Это просто текст с символами < и >
+            editorContent.textContent = htmlContent;
+        }
+    } else {
+        // Простой текст - преобразуем переносы строк в <br>
+        editorContent.innerHTML = htmlContent.replace(/\n/g, '<br>');
+    }
+    
+    // Обновить предпросмотр HTML кода
+    updateHtmlCodePreview();
+    
+    // Показать модальное окно
+    modal.classList.add('show');
+    
+    // Фокус на редакторе
+    setTimeout(() => {
+        editorContent.focus();
+    }, 100);
+}
+
+// Закрыть HTML редактор
+function closeHtmlEditor() {
+    const modal = document.getElementById('htmlEditorModal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+    flowEditor.currentEditingNodeId = null;
+}
+
+// Сохранить содержимое HTML редактора
+function saveHtmlEditor() {
+    const editorContent = document.getElementById('htmlEditorContent');
+    
+    if (!editorContent) {
+        console.error('Editor content not found');
+        return;
+    }
+    
+    // Получить HTML содержимое
+    let htmlContent = editorContent.innerHTML;
+    
+    // Удалить пустые <br> в конце
+    htmlContent = htmlContent.replace(/<br>$/, '');
+    
+    // Обновить текст узла
+    if (flowEditor.currentEditingNodeId) {
+        flowEditor.updateNode(flowEditor.currentEditingNodeId, { text: htmlContent });
+        
+        // Обновить textarea в свойствах узла
+        const nodeText = document.getElementById('nodeText');
+        if (nodeText) {
+            nodeText.value = htmlContent;
+        }
+    }
+    
+    // Закрыть редактор
+    closeHtmlEditor();
+}
+
+// Форматирование текста
+function formatText(command, value = null) {
+    document.execCommand(command, false, value);
+    updateHtmlCodePreview();
+}
+
+// Вставить ссылку
+function insertLink() {
+    const url = prompt('Введите URL ссылки:');
+    if (url) {
+        document.execCommand('createLink', false, url);
+        updateHtmlCodePreview();
+    }
+}
+
+// Вставить изображение
+function insertImage() {
+    const url = prompt('Введите URL изображения:');
+    if (url) {
+        document.execCommand('insertImage', false, url);
+        updateHtmlCodePreview();
+    }
+}
+
+// Вставить код
+function insertCode() {
+    const code = prompt('Введите код:');
+    if (code) {
+        const codeHtml = `<code>${code}</code>`;
+        document.execCommand('insertHTML', false, codeHtml);
+        updateHtmlCodePreview();
+    }
+}
+
+// Обновить предпросмотр HTML кода (скрыт, но нужен для работы редактора)
+function updateHtmlCodePreview() {
+    const editorContent = document.getElementById('htmlEditorContent');
+    const editorCode = document.getElementById('htmlEditorCode');
+    
+    if (editorContent && editorCode) {
+        // Форматировать HTML для лучшей читаемости
+        let html = editorContent.innerHTML;
+        // Удалить лишние пробелы и переносы
+        html = html.replace(/\s+/g, ' ').trim();
+        editorCode.value = html;
+    }
+}
+
+// Обработчик событий для редактора
+document.addEventListener('DOMContentLoaded', () => {
+    const editorContent = document.getElementById('htmlEditorContent');
+    
+    if (editorContent) {
+        // Обновлять предпросмотр при изменении содержимого
+        editorContent.addEventListener('input', updateHtmlCodePreview);
+        
+        // Обработка вставки текста
+        editorContent.addEventListener('paste', (e) => {
+            // Получить вставленный текст
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            let hasHtml = false;
+            
+            for (let index in items) {
+                const item = items[index];
+                if (item.kind === 'string' && item.type === 'text/html') {
+                    hasHtml = true;
+                    break;
+                }
+            }
+            
+            // Если есть HTML формат, используем его
+            if (hasHtml) {
+                e.preventDefault();
+                const html = (e.clipboardData || e.originalEvent.clipboardData).getData('text/html');
+                document.execCommand('insertHTML', false, html);
+            }
+            
+            setTimeout(updateHtmlCodePreview, 100);
+        });
+        
+        // Обработка клавиш
+        editorContent.addEventListener('keydown', (e) => {
+            // Ctrl+Enter для сохранения
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                saveHtmlEditor();
+            }
+            // Esc для закрытия
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeHtmlEditor();
+            }
+        });
+    }
+    
+    // Закрытие модального окна при клике вне его
+    const modal = document.getElementById('htmlEditorModal');
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeHtmlEditor();
+            }
+        });
+    }
 });

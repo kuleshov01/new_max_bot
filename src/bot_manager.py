@@ -25,7 +25,7 @@ class BotInstance:
         self.user_states = {}
         self.running = False
         self.thread = None
-        self.base_url = self.bot_config.get('base_url', 'https://botapi.max.ru')
+        self.base_url = self.bot_config.get('base_url', 'https://platform-api.max.ru')
         self.bot_name = self.bot_config.get('name', f'Bot_{bot_id}')
         self.bot_token = self.bot_config.get('token', '')
 
@@ -45,12 +45,13 @@ class BotInstance:
     def get_updates(self, marker=None):
         try:
             url = f"{self.base_url}/updates"
-            params = {"access_token": self.bot_token}
+            params = {}
             if marker:
                 params["marker"] = marker
+            headers = {"Authorization": self.bot_token}
             # Уменьшаем таймаут до 30 секунд для более быстрого отклика (как в main.py)
             self.log('DEBUG', f'Запрос обновлений с параметрами: marker={marker}')
-            response = requests.get(url, params=params, timeout=30)
+            response = requests.get(url, params=params, headers=headers, timeout=30)
             response.raise_for_status()
             result = response.json()
             updates_count = len(result.get('updates', []))
@@ -61,14 +62,17 @@ class BotInstance:
             self.log('ERROR', f'Ошибка при получении обновлений: {e}')
             return {"updates": [], "marker": None}
 
-    def send_message(self, chat_id, text, attachments=None):
+    def send_message(self, chat_id, text, attachments=None, format_type="html"):
         try:
             # Подставляем переменные в текст сообщения
             processed_text = self.replace_variables(chat_id, text)
 
-            url = f"{self.base_url}/messages?access_token={self.bot_token}&chat_id={chat_id}"
-            headers = {"Content-Type": "application/json"}
-            data = {"text": processed_text, "format": "markdown"}
+            url = f"{self.base_url}/messages?chat_id={chat_id}"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": self.bot_token
+            }
+            data = {"text": processed_text, "format": format_type}
             if attachments:
                 processed_attachments = []
                 for attachment in attachments:
@@ -76,9 +80,17 @@ class BotInstance:
                         processed_attachments.append(attachment)
                 if processed_attachments:
                     data["attachments"] = processed_attachments
-            self.log('DEBUG', f'Отправка сообщения в чат {chat_id}: "{processed_text[:30]}..."')
+            
+            # Логируем полный запрос для отладки
+            self.log('DEBUG', f'URL запроса: {url}')
+            self.log('DEBUG', f'Заголовки: {headers}')
+            self.log('DEBUG', f'Тело запроса: {data}')
+            self.log('DEBUG', f'Отправка сообщения в чат {chat_id}: "{processed_text[:30]}..." (формат: {format_type})')
+            
             # Уменьшаем таймаут для более быстрой отправки
             response = requests.post(url, headers=headers, json=data, timeout=15)
+            self.log('DEBUG', f'Статус ответа: {response.status_code}')
+            self.log('DEBUG', f'Тело ответа: {response.text[:500] if response.text else "пусто"}')
             response.raise_for_status()
             self.log('INFO', f'Сообщение отправлено в чат {chat_id}')
             return response.json()
@@ -210,8 +222,11 @@ class BotInstance:
 
     def answer_callback(self, callback_id, text=None):
         try:
-            url = f"{self.base_url}/answers?access_token={self.bot_token}"
-            headers = {"Content-Type": "application/json"}
+            url = f"{self.base_url}/answers"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": self.bot_token
+            }
             data = {"callback_id": callback_id}
             if text:
                 data["text"] = text
@@ -297,7 +312,23 @@ class BotInstance:
                     elif button_type == 'link':
                         button["url"] = btn.get('url', '')
                     elif button_type == 'open_app':
-                        button["appId"] = btn.get('appId', '')
+                        # web_app - это username бота или ссылка на бота
+                        webapp_url = btn.get('webAppUrl', '')
+                        if webapp_url:
+                            button["web_app"] = webapp_url
+                        
+                        # contact_id - ID бота, чьё мини-приложение запускаем
+                        contact_id = btn.get('contactId', '')
+                        if contact_id:
+                            try:
+                                button["contact_id"] = int(contact_id)
+                            except ValueError:
+                                self.log('WARNING', f'Некорректный contact_id для кнопки {btn.get("id")}: {contact_id}')
+                        
+                        # payload - параметры запуска для initData (опционально)
+                        payload_value = btn.get('payload', '')
+                        if payload_value:
+                            button["payload"] = payload_value
                     
                     buttons.append([button])
 
@@ -305,10 +336,16 @@ class BotInstance:
                     "type": "inline_keyboard",
                     "payload": {"buttons": buttons}
                 }
-                self.send_message(chat_id, node['text'], [keyboard])
+                # Используем формат из свойств узла (по умолчанию html)
+                format_type = node.get('format', 'html')
+                self.log('DEBUG', f'Формат текста для ноды {node_id}: {format_type}')
+                self.send_message(chat_id, node['text'], [keyboard], format_type=format_type)
             else:
                 self.log('DEBUG', f'Отображение ноды "{node_text_preview}" (без кнопок) для чата {chat_id}')
-                self.send_message(chat_id, node['text'])
+                # Используем формат из свойств узла (по умолчанию html)
+                format_type = node.get('format', 'html')
+                self.log('DEBUG', f'Формат текста для ноды {node_id}: {format_type}')
+                self.send_message(chat_id, node['text'], format_type=format_type)
                 
                 # Для нод без кнопок проверяем авто-переход
                 self.log('DEBUG', f'Проверка авто-перехода для ноды {node_id}')

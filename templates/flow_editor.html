@@ -48,6 +48,54 @@
                 <svg id="connections"></svg>
                 <div id="nodes"></div>
             </div>
+            <!-- Элементы управления масштабом -->
+            <div class="zoom-controls">
+                <button class="zoom-btn" onclick="zoomIn()" title="Увеличить">➕</button>
+                <span class="zoom-level" id="zoomLevel">100%</span>
+                <button class="zoom-btn" onclick="zoomOut()" title="Уменьшить">➖</button>
+                <button class="zoom-btn" onclick="zoomReset()" title="Сбросить">↺</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Модальное окно HTML редактора -->
+    <div id="htmlEditorModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📝 Редактор форматированного текста</h3>
+                <button class="modal-close" onclick="closeHtmlEditor()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Панель инструментов -->
+                <div class="editor-toolbar">
+                    <button class="toolbar-btn" onclick="formatText('bold')" title="Жирный"><b>B</b></button>
+                    <button class="toolbar-btn" onclick="formatText('italic')" title="Курсив"><i>I</i></button>
+                    <button class="toolbar-btn" onclick="formatText('underline')" title="Подчёркнутый"><u>U</u></button>
+                    <button class="toolbar-btn" onclick="formatText('strikeThrough')" title="Зачёркнутый"><s>S</s></button>
+                    <div class="toolbar-divider"></div>
+                    <button class="toolbar-btn" onclick="formatText('justifyLeft')" title="По левому краю">⬅️</button>
+                    <button class="toolbar-btn" onclick="formatText('justifyCenter')" title="По центру">⬆️</button>
+                    <button class="toolbar-btn" onclick="formatText('justifyRight')" title="По правому краю">➡️</button>
+                    <div class="toolbar-divider"></div>
+                    <button class="toolbar-btn" onclick="formatText('insertUnorderedList')" title="Маркированный список">•</button>
+                    <button class="toolbar-btn" onclick="formatText('insertOrderedList')" title="Нумерованный список">1.</button>
+                    <div class="toolbar-divider"></div>
+                    <button class="toolbar-btn" onclick="insertLink()" title="Вставить ссылку">🔗</button>
+                    <button class="toolbar-btn" onclick="insertImage()" title="Вставить изображение">🖼️</button>
+                    <button class="toolbar-btn" onclick="insertCode()" title="Вставить код">&lt;/&gt;</button>
+                </div>
+                <!-- Область редактирования -->
+                <div id="htmlEditorContent" class="editor-content" contenteditable="true" placeholder="Введите текст здесь..."></div>
+                <!-- Предпросмотр HTML (скрыт, но нужен для работы редактора) -->
+                <div class="editor-preview" style="display: none;">
+                    <label>HTML код:</label>
+                    <textarea id="htmlEditorCode" class="editor-code" readonly></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-action" onclick="saveHtmlEditor()">✅ Сохранить</button>
+                <button class="btn btn-mode" onclick="closeHtmlEditor()">❌ Отмена</button>
+            </div>
         </div>
     </div>
     
