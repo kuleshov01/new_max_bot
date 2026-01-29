@@ -22,6 +22,13 @@ class BotInstance:
         self.bot_id = bot_id
         self.bot_config = get_bot(bot_id)
         self.flow_data = get_bot_flow(bot_id)
+        
+        # Проверка на случай отсутствия БД
+        if not self.bot_config:
+            raise ValueError(f"Bot configuration not found for ID: {bot_id}")
+        if not self.flow_data:
+            raise ValueError(f"Bot flow not found for ID: {bot_id}")
+        
         self.user_states = {}
         self.running = False
         self.thread = None
@@ -558,7 +565,10 @@ class BotInstance:
     
     def run(self):
         self.running = True
-        self.bot_config = get_bot(self.bot_id)
+        # Обновляем конфигурацию бота при запуске
+        bot_config = get_bot(self.bot_id)
+        if bot_config:
+            self.bot_config = bot_config
         marker = None
 
         self.log('INFO', f'Бот \"{self.bot_name}\" [ID:{self.bot_id}] запущен')
@@ -685,7 +695,10 @@ class BotManager:
 
     def restart_bot(self, bot_id):
         bot_config = get_bot(bot_id)
-        bot_name = bot_config.get('name', f'Bot_{bot_id}') if bot_config else f'Bot_{bot_id}'
+        if not bot_config:
+            logging.error(f"[BotManager] Не удалось перезагрузить бот [ID:{bot_id}]: бот не найден")
+            return False
+        bot_name = bot_config.get('name', f'Bot_{bot_id}')
         logging.info(f"[BotManager] Перезагрузка бота \"{bot_name}\" [ID:{bot_id}]\"")
         self.stop_bot(bot_id)
         time.sleep(1)

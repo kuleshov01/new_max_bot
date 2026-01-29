@@ -9,6 +9,9 @@ BASE_DIR = Path(__file__).parent.parent
 DB_FILE = str(BASE_DIR / 'data' / 'db' / 'bots_data.db')
 LOGS_DIR = str(BASE_DIR / 'data' / 'logs')
 
+# Флаг для отслеживания инициализации БД
+_db_initialized = False
+
 def ensure_directories():
     """Создаёт необходимые директории, если они не существуют"""
     db_dir = os.path.dirname(DB_FILE)
@@ -16,6 +19,11 @@ def ensure_directories():
     os.makedirs(LOGS_DIR, exist_ok=True)
 
 def init_db():
+    """Инициализирует базу данных, создавая таблицы если они не существуют"""
+    global _db_initialized
+    if _db_initialized:
+        return
+    
     # Убеждаемся, что директории существуют
     ensure_directories()
     
@@ -59,8 +67,11 @@ def init_db():
     
     conn.commit()
     conn.close()
+    _db_initialized = True
 
 def add_bot(name, token, base_url='https://platform-api.max.ru'):
+    """Добавляет нового бота в базу данных. БД создаётся автоматически при первом вызове."""
+    init_db()  # Автоматическая инициализация при первом использовании
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -77,6 +88,10 @@ def add_bot(name, token, base_url='https://platform-api.max.ru'):
     return bot_id
 
 def get_bot(bot_id):
+    """Получает информацию о боте по ID. Если БД не существует, возвращает None."""
+    if not os.path.exists(DB_FILE):
+        return None
+    init_db()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -100,6 +115,10 @@ def get_bot(bot_id):
     return None
 
 def get_all_bots():
+    """Получает список всех ботов. Если БД не существует, возвращает пустой список."""
+    if not os.path.exists(DB_FILE):
+        return []
+    init_db()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -124,6 +143,8 @@ def get_all_bots():
     ]
 
 def update_bot(bot_id, name=None, token=None, base_url=None):
+    """Обновляет информацию о боте. БД создаётся автоматически при первом вызове."""
+    init_db()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -151,6 +172,10 @@ def update_bot(bot_id, name=None, token=None, base_url=None):
     conn.close()
 
 def delete_bot(bot_id):
+    """Удаляет бота из базы данных."""
+    if not os.path.exists(DB_FILE):
+        return
+    init_db()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -160,6 +185,8 @@ def delete_bot(bot_id):
     conn.close()
 
 def update_bot_status(bot_id, status):
+    """Обновляет статус бота. БД создаётся автоматически при первом вызове."""
+    init_db()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -170,6 +197,8 @@ def update_bot_status(bot_id, status):
     conn.close()
 
 def save_bot_flow(bot_id, flow_data):
+    """Сохраняет flow для бота. БД создаётся автоматически при первом вызове."""
+    init_db()
     # Проверяем, что flow не пустой
     nodes = flow_data.get('nodes', [])
     if not nodes:
@@ -202,6 +231,10 @@ def save_bot_flow(bot_id, flow_data):
     conn.close()
 
 def get_bot_flow(bot_id):
+    """Получает flow бота. Если БД не существует, возвращает None."""
+    if not os.path.exists(DB_FILE):
+        return None
+    init_db()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -215,6 +248,8 @@ def get_bot_flow(bot_id):
     return None
 
 def add_bot_log(bot_id, level, message):
+    """Добавляет лог для бота. БД создаётся автоматически при первом вызове."""
+    init_db()
     import time
     for attempt in range(5):
         try:
@@ -239,6 +274,10 @@ def add_bot_log(bot_id, level, message):
     raise Exception("Failed to add log after retries")
 
 def get_bot_logs(bot_id, limit=100):
+    """Получает логи бота. Если БД не существует, возвращает пустой список."""
+    if not os.path.exists(DB_FILE):
+        return []
+    init_db()
     import time
     for attempt in range(5):
         try:
@@ -276,6 +315,10 @@ def get_bot_logs(bot_id, limit=100):
     raise Exception("Failed to get logs after retries")
 
 def clear_bot_logs(bot_id):
+    """Очищает логи бота."""
+    if not os.path.exists(DB_FILE):
+        return
+    init_db()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -284,4 +327,5 @@ def clear_bot_logs(bot_id):
     conn.commit()
     conn.close()
 
-init_db()
+# БД больше не инициализируется автоматически при импорте модуля
+# Инициализация происходит при первом вызове любой функции, работающей с БД

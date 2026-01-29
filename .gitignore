@@ -25,3 +25,9 @@ ENV/
 # Переменные окружения
 .env
 .env.local
+
+# Базы данных SQLite
+*.db
+*.sqlite
+*.sqlite3
+data/db/
