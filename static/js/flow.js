@@ -19,6 +19,12 @@ class FlowEditor {
         this.resizeStart = { x: 0, y: 0, width: 0, height: 0 };
         this.currentEditingNodeId = null;
 
+        // Helper function to build API URL with base path
+        this.apiUrl = (path) => {
+            const baseUrl = window.API_BASE_URL || '';
+            return baseUrl + '/' + path.replace(/^\/+/, '');
+        };
+
         this.init();
     }
     
@@ -52,9 +58,9 @@ class FlowEditor {
     
     async loadBots() {
         try {
-            const response = await fetch('/api/bots');
+            const response = await fetch(this.apiUrl('api/bots'));
             const bots = await response.json();
-            
+
             this.botSelect.innerHTML = '<option value="new">+ Создать нового бота...</option>';
             bots.forEach(bot => {
                 const option = document.createElement('option');
@@ -72,9 +78,9 @@ class FlowEditor {
     
     async loadBotFlow(botId) {
         try {
-            const response = await fetch(`/api/bots/${botId}/flow`);
+            const response = await fetch(this.apiUrl(`api/bots/${botId}/flow`));
             const flowData = await response.json();
-            
+
             if (flowData && flowData.nodes) {
                 this.nodes = flowData.nodes;
                 this.connections = flowData.connections || [];
@@ -1262,7 +1268,7 @@ class FlowEditor {
         if (!token) return;
         
         try {
-            const response = await fetch('/api/bots', {
+            const response = await fetch(this.apiUrl('api/bots'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -1739,7 +1745,7 @@ class FlowEditor {
         };
 
         try {
-            const response = await fetch(`/api/bots/${this.currentBotId}/flow`, {
+            const response = await fetch(this.apiUrl(`api/bots/${this.currentBotId}/flow`), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -2002,9 +2008,13 @@ function toggleDebug() {
         document.body.appendChild(debugDiv);
     }
 
-    // Show the debug div and update content
-    debugDiv.style.display = 'block';
-    updateDebugInfo();
+    // Toggle visibility of the debug div
+    if (debugDiv.style.display === 'block') {
+        debugDiv.style.display = 'none';
+    } else {
+        debugDiv.style.display = 'block';
+        updateDebugInfo();
+    }
 }
 
 // Function to update debug information
@@ -2254,8 +2264,15 @@ function openHtmlEditor(nodeId) {
         editorContent.innerHTML = htmlContent.replace(/\n/g, '<br>');
     }
     
-    // Обновить предпросмотр HTML кода
+    // Обновить HTML код в textarea
     updateHtmlCodePreview();
+    
+    // Сбросить режим на WYSIWYG
+    currentEditorMode = 'wysiwyg';
+    setEditorMode('wysiwyg');
+    
+    // Инициализировать счётчик символов
+    updateCharCounter();
     
     // Показать модальное окно
     modal.classList.add('show');
@@ -2278,14 +2295,22 @@ function closeHtmlEditor() {
 // Сохранить содержимое HTML редактора
 function saveHtmlEditor() {
     const editorContent = document.getElementById('htmlEditorContent');
+    const editorCode = document.getElementById('htmlEditorCode');
     
-    if (!editorContent) {
-        console.error('Editor content not found');
+    if (!editorContent || !editorCode) {
+        console.error('Editor elements not found');
         return;
     }
     
-    // Получить HTML содержимое
-    let htmlContent = editorContent.innerHTML;
+    // Получить HTML содержимое из активного режима
+    let htmlContent;
+    if (currentEditorMode === 'html') {
+        // Из режима HTML кода
+        htmlContent = editorCode.value;
+    } else {
+        // Из WYSIWYG режима
+        htmlContent = editorContent.innerHTML;
+    }
     
     // Удалить пустые <br> в конце
     htmlContent = htmlContent.replace(/<br>$/, '');
@@ -2353,13 +2378,158 @@ function updateHtmlCodePreview() {
     }
 }
 
+// Переменная для отслеживания текущего режима редактора
+let currentEditorMode = 'wysiwyg';
+const MAX_CHAR_LIMIT = 4000;
+
+// Обновить счётчик символов
+function updateCharCounter() {
+    const editorContent = document.getElementById('htmlEditorContent');
+    const editorCode = document.getElementById('htmlEditorCode');
+    const charCount = document.getElementById('charCount');
+    const charLimitWarning = document.getElementById('charLimitWarning');
+    const counterContainer = document.querySelector('.editor-char-counter');
+    
+    if (!charCount || !charLimitWarning || !counterContainer) {
+        return;
+    }
+    
+    let currentLength = 0;
+    
+    // Всегда считаем количество символов в HTML-версии текста,
+    // так как именно HTML отправляется на сервер
+    if (currentEditorMode === 'html') {
+        // В режиме HTML кода берём напрямую из textarea
+        currentLength = editorCode ? editorCode.value.length : 0;
+    } else {
+        // В WYSIWYG режиме нужно синхронизировать HTML код и взять его длину
+        if (editorContent && editorCode) {
+            // Синхронизируем HTML код перед подсчётом
+            let html = editorContent.innerHTML;
+            // Форматируем так же, как в updateHtmlCodePreview
+            html = html.replace(/\s+/g, ' ').trim();
+            currentLength = html.length;
+        } else if (editorCode) {
+            // Если editorContent недоступен, берём из editorCode
+            currentLength = editorCode.value.length;
+        }
+    }
+    
+    charCount.textContent = currentLength;
+    
+    // Обновить стили в зависимости от количества символов
+    counterContainer.classList.remove('warning', 'error');
+    
+    if (currentLength > MAX_CHAR_LIMIT) {
+        counterContainer.classList.add('error');
+        charLimitWarning.style.display = 'inline';
+    } else if (currentLength > MAX_CHAR_LIMIT * 0.9) {
+        counterContainer.classList.add('warning');
+        charLimitWarning.style.display = 'none';
+    } else {
+        charLimitWarning.style.display = 'none';
+    }
+}
+
+// Проверить и ограничить ввод при превышении лимита
+function enforceCharLimit(element, isContentEditable = false) {
+    let currentHtmlLength = 0;
+    
+    if (isContentEditable) {
+        // Для WYSIWYG режима считаем длину HTML после форматирования
+        let html = element.innerHTML;
+        html = html.replace(/\s+/g, ' ').trim();
+        currentHtmlLength = html.length;
+    } else {
+        // Для HTML режима считаем длину значения textarea
+        currentHtmlLength = element.value.length;
+    }
+    
+    if (currentHtmlLength > MAX_CHAR_LIMIT) {
+        if (isContentEditable) {
+            // Для contenteditable сложно корректно обрезать HTML без нарушения структуры
+            // Поэтому просто предотвращаем дальнейший ввод через обработчик keydown
+            // Но если уже превысили лимит, пытаемся открутить последнее изменение
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                document.execCommand('undo', false, null);
+            }
+        } else {
+            // Для textarea просто обрезаем значение
+            element.value = element.value.substring(0, MAX_CHAR_LIMIT);
+        }
+        
+        updateCharCounter();
+        return false;
+    }
+    return true;
+}
+
+// Переключение режима редактирования (WYSIWYG <-> HTML код)
+function setEditorMode(mode) {
+    const wysiwygBtn = document.getElementById('wysiwygModeBtn');
+    const htmlBtn = document.getElementById('htmlModeBtn');
+    const editorContent = document.getElementById('htmlEditorContent');
+    const editorCode = document.getElementById('htmlEditorCode');
+    const editorToolbar = document.getElementById('editorToolbar');
+    const htmlCodeEditor = document.getElementById('htmlCodeEditor');
+    
+    if (!wysiwygBtn || !htmlBtn || !editorContent || !editorCode || !editorToolbar || !htmlCodeEditor) {
+        console.error('Editor elements not found');
+        return;
+    }
+    
+    currentEditorMode = mode;
+    
+    if (mode === 'wysiwyg') {
+        // Переключение на WYSIWYG режим
+        wysiwygBtn.classList.add('active');
+        htmlBtn.classList.remove('active');
+        
+        // Синхронизация: обновляем WYSIWYG из HTML кода
+        editorContent.innerHTML = editorCode.value;
+        
+        // Показываем WYSIWYG редактор и панель инструментов
+        editorContent.style.display = 'block';
+        editorToolbar.style.display = 'flex';
+        htmlCodeEditor.style.display = 'none';
+    } else {
+        // Переключение на HTML код режим
+        wysiwygBtn.classList.remove('active');
+        htmlBtn.classList.add('active');
+        
+        // Синхронизация: обновляем HTML код из WYSIWYG
+        updateHtmlCodePreview();
+        
+        // Показываем редактор HTML кода, скрываем панель инструментов
+        editorContent.style.display = 'none';
+        editorToolbar.style.display = 'none';
+        htmlCodeEditor.style.display = 'block';
+        
+        // Фокус на редакторе кода
+        setTimeout(() => {
+            editorCode.focus();
+        }, 100);
+    }
+    
+    // Обновить счётчик символов после переключения режима
+    updateCharCounter();
+}
+
 // Обработчик событий для редактора
 document.addEventListener('DOMContentLoaded', () => {
     const editorContent = document.getElementById('htmlEditorContent');
+    const editorCode = document.getElementById('htmlEditorCode');
     
     if (editorContent) {
-        // Обновлять предпросмотр при изменении содержимого
-        editorContent.addEventListener('input', updateHtmlCodePreview);
+        // Обновлять HTML код и счётчик символов при изменении содержимого WYSIWYG
+        editorContent.addEventListener('input', () => {
+            if (currentEditorMode === 'wysiwyg') {
+                enforceCharLimit(editorContent, true);
+                updateHtmlCodePreview();
+                updateCharCounter();
+            }
+        });
         
         // Обработка вставки текста
         editorContent.addEventListener('paste', (e) => {
@@ -2382,11 +2552,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.execCommand('insertHTML', false, html);
             }
             
-            setTimeout(updateHtmlCodePreview, 100);
+            setTimeout(() => {
+                if (currentEditorMode === 'wysiwyg') {
+                    enforceCharLimit(editorContent, true);
+                    updateHtmlCodePreview();
+                    updateCharCounter();
+                }
+            }, 100);
         });
         
-        // Обработка клавиш
+        // Обработка клавиш в WYSIWYG режиме
         editorContent.addEventListener('keydown', (e) => {
+            // Проверить лимит перед вводом (кроме специальных клавиш)
+            if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1) {
+                // Проверяем длину HTML, а не просто текста
+                let html = editorContent.innerHTML;
+                html = html.replace(/\s+/g, ' ').trim();
+                if (html.length >= MAX_CHAR_LIMIT) {
+                    e.preventDefault();
+                    return;
+                }
+            }
+            
             // Ctrl+Enter для сохранения
             if (e.ctrlKey && e.key === 'Enter') {
                 e.preventDefault();
@@ -2400,13 +2587,44 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Закрытие модального окна при клике вне его
-    const modal = document.getElementById('htmlEditorModal');
-    if (modal) {
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
+    if (editorCode) {
+        // Обновлять счётчик символов при изменении HTML кода
+        editorCode.addEventListener('input', () => {
+            if (currentEditorMode === 'html') {
+                enforceCharLimit(editorCode, false);
+                updateCharCounter();
+            }
+        });
+        
+        // Обработка клавиш в HTML код режиме
+        editorCode.addEventListener('keydown', (e) => {
+            // Ctrl+Enter для сохранения
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                saveHtmlEditor();
+            }
+            // Esc для закрытия
+            if (e.key === 'Escape') {
+                e.preventDefault();
                 closeHtmlEditor();
+            }
+            // Tab для вставки табуляции (вместо перехода фокуса)
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                const start = editorCode.selectionStart;
+                const end = editorCode.selectionEnd;
+                const newValue = editorCode.value.substring(0, start) + '    ' + editorCode.value.substring(end);
+                
+                // Проверить лимит
+                if (newValue.length <= MAX_CHAR_LIMIT) {
+                    editorCode.value = newValue;
+                    editorCode.selectionStart = editorCode.selectionEnd = start + 4;
+                    updateCharCounter();
+                }
             }
         });
     }
+    
+    // Закрытие модального окна только по кнопке закрытия или Escape
+    // Клик вне модального окна больше не закрывает его
 });

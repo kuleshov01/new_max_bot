@@ -1,9 +1,15 @@
 let bots = [];
 let currentLogsBotId = null;
 
+// Helper function to build API URL with base path
+function apiUrl(path) {
+    const baseUrl = window.API_BASE_URL || '';
+    return baseUrl + '/' + path.replace(/^\/+/, '');
+}
+
 async function loadBots() {
     try {
-        const response = await fetch('/api/bots');
+        const response = await fetch(apiUrl('api/bots'));
         bots = await response.json();
         renderBots();
     } catch (error) {
@@ -54,7 +60,7 @@ function renderBots() {
                             : `<button class="btn btn-success" onclick="startBot(${bot.id})">Запустить</button>`
                         }
                         <button class="btn btn-info" onclick="restartBot(${bot.id})">Перезапуск</button>
-                        <a href="/flow-editor?botId=${bot.id}" class="btn btn-secondary">🎨 Диалог</a>
+                        <a href="${apiUrl('flow-editor')}?botId=${bot.id}" class="btn btn-secondary">🎨 Диалог</a>
                         <button class="btn btn-dark" onclick="openLogsModal(${bot.id})">📋 Логи</button>
                         <button class="btn btn-primary" onclick="openEditModal(${bot.id})">Настройки</button>
                         <button class="btn btn-danger" onclick="deleteBot(${bot.id})">Удалить</button>
@@ -76,7 +82,7 @@ async function createBot() {
     }
 
     try {
-        const response = await fetch('/api/bots', {
+        const response = await fetch(apiUrl('api/bots'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -106,7 +112,7 @@ async function createBot() {
 
 async function startBot(botId) {
     try {
-        const response = await fetch(`/api/bots/${botId}/start`, { method: 'POST' });
+        const response = await fetch(apiUrl(`api/bots/${botId}/start`), { method: 'POST' });
         if (response.ok) {
             await loadBots();
         } else {
@@ -120,7 +126,7 @@ async function startBot(botId) {
 
 async function stopBot(botId) {
     try {
-        const response = await fetch(`/api/bots/${botId}/stop`, { method: 'POST' });
+        const response = await fetch(apiUrl(`api/bots/${botId}/stop`), { method: 'POST' });
         if (response.ok) {
             await loadBots();
         } else {
@@ -134,7 +140,7 @@ async function stopBot(botId) {
 
 async function restartBot(botId) {
     try {
-        const response = await fetch(`/api/bots/${botId}/restart`, { method: 'POST' });
+        const response = await fetch(apiUrl(`api/bots/${botId}/restart`), { method: 'POST' });
         if (response.ok) {
             await loadBots();
         } else {
@@ -150,9 +156,9 @@ async function deleteBot(botId) {
     if (!confirm('Вы уверены, что хотите удалить этого бота?')) {
         return;
     }
-    
+
     try {
-        const response = await fetch(`/api/bots/${botId}`, { method: 'DELETE' });
+        const response = await fetch(apiUrl(`api/bots/${botId}`), { method: 'DELETE' });
         if (response.ok) {
             await loadBots();
         } else {
@@ -170,13 +176,42 @@ function openEditModal(botId) {
     
     document.getElementById('editBotId').value = bot.id;
     document.getElementById('editBotName').value = bot.name;
-    document.getElementById('editBotToken').value = bot.token;
+    
+    // Маскируем токен - показываем только первые 8 символов
+    const tokenInput = document.getElementById('editBotToken');
+    tokenInput.value = bot.token.substring(0, 8) + '••••••••••••••••';
+    tokenInput.dataset.fullToken = bot.token; // Сохраняем полный токен в data-атрибуте
+    tokenInput.dataset.isMasked = 'true'; // Флаг, что токен замаскирован
+    
     document.getElementById('editBotBaseUrl').value = bot.base_url;
     document.getElementById('editBotStartMessage').value = bot.start_message || '';
     document.getElementById('editBotMenuConfig').value = JSON.stringify(bot.menu_config || [], null, 2);
     
+    // Сбрасываем кнопку показа токена
+    const toggleBtn = document.getElementById('toggleTokenBtn');
+    toggleBtn.textContent = '👁️ Показать';
+    
     const modal = new bootstrap.Modal(document.getElementById('editBotModal'));
     modal.show();
+}
+
+function toggleTokenVisibility() {
+    const tokenInput = document.getElementById('editBotToken');
+    const toggleBtn = document.getElementById('toggleTokenBtn');
+    const isMasked = tokenInput.dataset.isMasked === 'true';
+    
+    if (isMasked) {
+        // Показываем полный токен
+        tokenInput.value = tokenInput.dataset.fullToken;
+        tokenInput.dataset.isMasked = 'false';
+        toggleBtn.textContent = '🙈 Скрыть';
+    } else {
+        // Скрываем токен
+        const fullToken = tokenInput.dataset.fullToken || tokenInput.value;
+        tokenInput.value = fullToken.substring(0, 8) + '••••••••••••••••';
+        tokenInput.dataset.isMasked = 'true';
+        toggleBtn.textContent = '👁️ Показать';
+    }
 }
 
 let logsAutoRefreshInterval = null;
@@ -226,7 +261,8 @@ function openLogsModal(botId) {
 async function updateBot() {
     const botId = parseInt(document.getElementById('editBotId').value);
     const name = document.getElementById('editBotName').value.trim();
-    const token = document.getElementById('editBotToken').value.trim();
+    const tokenInput = document.getElementById('editBotToken');
+    let token = tokenInput.value.trim();
     const base_url = document.getElementById('editBotBaseUrl').value.trim();
     const start_message = document.getElementById('editBotStartMessage').value.trim();
     const menu_config_str = document.getElementById('editBotMenuConfig').value.trim();
@@ -234,6 +270,11 @@ async function updateBot() {
     if (!name || !token) {
         alert('Пожалуйста, заполните название и токен');
         return;
+    }
+    
+    // Если токен замаскирован (содержит маскирующие символы), используем полный токен из data-атрибута
+    if (token.includes('•••') && tokenInput.dataset.fullToken) {
+        token = tokenInput.dataset.fullToken;
     }
     
     let menu_config = [];
@@ -247,7 +288,7 @@ async function updateBot() {
     }
     
     try {
-        const response = await fetch(`/api/bots/${botId}`, {
+        const response = await fetch(apiUrl(`api/bots/${botId}`), {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json'
@@ -294,7 +335,7 @@ async function loadLogsForBot(botId) {
     }
     
     try {
-        const response = await fetch(`/api/bots/${botId}/logs?limit=200&_t=${Date.now()}`, {
+        const response = await fetch(apiUrl(`api/bots/${botId}/logs?limit=200&_t=${Date.now()}`), {
             cache: 'no-cache',
             headers: {
                 'Cache-Control': 'no-cache'
@@ -337,7 +378,7 @@ async function clearCurrentBotLogs() {
     }
     
     try {
-        const response = await fetch(`/api/bots/${currentLogsBotId}/logs`, { method: 'DELETE' });
+        const response = await fetch(apiUrl(`api/bots/${currentLogsBotId}/logs`), { method: 'DELETE' });
         if (response.ok) {
             document.getElementById('logsList').innerHTML = '<div class="alert alert-success">Логи очищены</div>';
         } else {
