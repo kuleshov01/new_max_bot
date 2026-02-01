@@ -157,9 +157,9 @@ select:focus, input:focus, textarea:focus {
 
 /* Элементы управления масштабом */
 .zoom-controls {
-    position: absolute;
-    bottom: 20px;
-    right: 20px;
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
     display: flex;
     align-items: center;
     gap: 10px;
