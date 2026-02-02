@@ -18,6 +18,16 @@ class FlowEditor {
         this.resizeHandle = null;
         this.resizeStart = { x: 0, y: 0, width: 0, height: 0 };
         this.currentEditingNodeId = null;
+        
+        // Touch support properties
+        this.lastTouchDistance = 0;
+        this.lastTouchCenter = { x: 0, y: 0 };
+        this.touchStartScale = 1;
+        this.touchStartOffset = { x: 0, y: 0 };
+        this.initialTouchDistance = 0;  // Начальное расстояние при начале pinch zoom
+        
+        // Pointer tracking for pinch-to-zoom
+        this.activePointers = new Map();  // pointerId -> {x, y}
 
         // Helper function to build API URL with base path
         this.apiUrl = (path) => {
@@ -111,6 +121,19 @@ class FlowEditor {
         this.canvas.addEventListener('mousemove', this.handleCanvasMouseMove.bind(this));
         this.canvas.addEventListener('mouseup', this.handleCanvasMouseUp.bind(this));
         this.canvas.addEventListener('wheel', this.handleWheel.bind(this));
+        this.canvas.addEventListener('dblclick', this.handleCanvasDoubleClick.bind(this));
+        
+        // Pointer events for mobile/tablet support (works better than touch events)
+        this.canvas.addEventListener('pointerdown', this.handlePointerDown.bind(this));
+        this.canvas.addEventListener('pointermove', this.handlePointerMove.bind(this));
+        this.canvas.addEventListener('pointerup', this.handlePointerUp.bind(this));
+        this.canvas.addEventListener('pointercancel', this.handlePointerUp.bind(this));
+        
+        // Also bind to nodes container
+        this.nodesContainer.addEventListener('pointerdown', this.handlePointerDown.bind(this));
+        this.nodesContainer.addEventListener('pointermove', this.handlePointerMove.bind(this));
+        this.nodesContainer.addEventListener('pointerup', this.handlePointerUp.bind(this));
+        this.nodesContainer.addEventListener('pointercancel', this.handlePointerUp.bind(this));
         
         document.addEventListener('keydown', this.handleKeyDown.bind(this));
         
@@ -125,7 +148,7 @@ class FlowEditor {
             y: 100,
             text: '👋 Добро пожаловать!\n\nВыберите действие:',
             buttons: [],
-            format: 'html', // По умолчанию HTML
+            format: 'markdown', // По умолчанию Markdown
             isStart: true
         };
         this.nodes.push(startNode);
@@ -139,7 +162,7 @@ class FlowEditor {
             y: y,
             text: type === 'message' ? 'Введите сообщение...' : 'Выберите вариант:',
             buttons: [],
-            format: 'html', // По умолчанию HTML
+            format: 'markdown', // По умолчанию Markdown
             isStart: false
         };
 
@@ -167,7 +190,7 @@ class FlowEditor {
                 { id: `btn_${this.nodeIdCounter}_0`, text: 'Вариант 1', nextNodeId: null },
                 { id: `btn_${this.nodeIdCounter}_1`, text: 'Вариант 2', nextNodeId: null }
             ],
-            format: 'html', // По умолчанию HTML
+            format: 'markdown', // По умолчанию Markdown
             isStart: false
         };
 
@@ -511,6 +534,22 @@ class FlowEditor {
         }
     }
     
+    handleCanvasDoubleClick(e) {
+        // Проверяем, кликнули ли на узел
+        if (e.target.closest('.node')) {
+            const nodeEl = e.target.closest('.node');
+            const nodeId = nodeEl.dataset.id;
+            const node = this.nodes.find(n => n.id === nodeId);
+            
+            // Открываем Markdown редактор только для узлов типа message, menu, universal или start
+            if (node && (node.type === 'message' || node.type === 'menu' || node.type === 'universal' || node.isStart)) {
+                e.preventDefault();
+                e.stopPropagation();
+                openMarkdownEditor(nodeId);
+            }
+        }
+    }
+    
     handleCanvasMouseMove(e) {
         const rect = this.canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left - this.offset.x) / this.scale;
@@ -526,18 +565,22 @@ class FlowEditor {
                 let newWidth = this.resizeStart.width;
                 let newHeight = this.resizeStart.height;
                 
+                // Вычисляем минимальную высоту на основе количества кнопок
+                const buttonCount = node.buttons ? node.buttons.length : 0;
+                const minHeight = buttonCount > 0 ? (125 + buttonCount * 35) : 150;
+                
                 // Только вправо (e)
                 if (handle === 'e') {
                     newWidth = Math.max(200, this.resizeStart.width + dx);
                 }
                 // Только вниз (s)
                 else if (handle === 's') {
-                    newHeight = Math.max(150, this.resizeStart.height + dy);
+                    newHeight = Math.max(minHeight, this.resizeStart.height + dy);
                 }
                 // Диагональ право-низ (se)
                 else if (handle === 'se') {
                     newWidth = Math.max(200, this.resizeStart.width + dx);
-                    newHeight = Math.max(150, this.resizeStart.height + dy);
+                    newHeight = Math.max(minHeight, this.resizeStart.height + dy);
                 }
                 
                 node.width = newWidth;
@@ -611,6 +654,368 @@ class FlowEditor {
         this.updateZoomLevel();
         this.render();
     }
+
+    // Helper method to get distance between two touch points
+    getTouchDistance(touches) {
+        if (touches.length < 2) return 0;
+        const dx = touches[0].clientX - touches[1].clientX;
+        const dy = touches[0].clientY - touches[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // Helper method to get center point between two touch points
+    getTouchCenter(touches) {
+        if (touches.length < 2) return { x: touches[0].clientX, y: touches[0].clientY };
+        return {
+            x: (touches[0].clientX + touches[1].clientX) / 2,
+            y: (touches[0].clientY + touches[1].clientY) / 2
+        };
+    }
+
+    handleTouchStart(e) {
+        if (e.touches.length === 1) {
+            // Single touch - handle canvas panning and node selection
+            const touch = e.touches[0];
+            const rect = this.canvas.getBoundingClientRect();
+            const x = (touch.clientX - rect.left - this.offset.x) / this.scale;
+            const y = (touch.clientY - rect.top - this.offset.y) / this.scale;
+            
+            // Check if touching a node
+            const target = document.elementFromPoint(touch.clientX, touch.clientY);
+            const nodeEl = target?.closest('.node');
+            
+            if (nodeEl) {
+                // Touching a node - select and prepare for dragging
+                const nodeId = nodeEl.dataset.id;
+                this.selectNode(nodeId);
+                this.draggedNode = nodeId;
+                this.isDraggingCanvas = false;
+                this.dragOffset = {
+                    x: x - this.nodes.find(n => n.id === nodeId).x,
+                    y: y - this.nodes.find(n => n.id === nodeId).y
+                };
+            } else {
+                // Touching empty space - prepare for canvas panning
+                this.isDraggingCanvas = true;
+                this.draggedNode = null;
+                this.lastMousePos = { x: touch.clientX, y: touch.clientY };
+                this.selectedNode = null;
+                this.showNodeProperties(null);
+                this.render();
+            }
+        } else if (e.touches.length === 2) {
+            // Two fingers - prepare for pinch zoom
+            this.lastTouchDistance = this.getTouchDistance(e.touches);
+            this.initialTouchDistance = this.lastTouchDistance;
+            this.lastTouchCenter = this.getTouchCenter(e.touches);
+            this.touchStartScale = this.scale;
+            this.touchStartOffset = { ...this.offset };
+        }
+    }
+
+    handleTouchMove(e) {
+        if (e.touches.length === 1) {
+            // Single touch - handle dragging
+            const touch = e.touches[0];
+            const rect = this.canvas.getBoundingClientRect();
+            const x = (touch.clientX - rect.left - this.offset.x) / this.scale;
+            const y = (touch.clientY - rect.top - this.offset.y) / this.scale;
+            
+            if (this.draggedNode) {
+                // Dragging a node
+                e.preventDefault();
+                const node = this.nodes.find(n => n.id === this.draggedNode);
+                if (node) {
+                    node.x = x - this.dragOffset.x;
+                    node.y = y - this.dragOffset.y;
+                    this.render();
+                }
+            } else if (this.isDraggingCanvas) {
+                // Panning the canvas
+                e.preventDefault();
+                const dx = touch.clientX - this.lastMousePos.x;
+                const dy = touch.clientY - this.lastMousePos.y;
+                this.offset.x += dx;
+                this.offset.y += dy;
+                this.lastMousePos = { x: touch.clientX, y: touch.clientY };
+                this.render();
+            }
+        } else if (e.touches.length === 2) {
+            // Two fingers - pinch zoom and pan
+            e.preventDefault();
+            const currentDistance = this.getTouchDistance(e.touches);
+            const currentCenter = this.getTouchCenter(e.touches);
+            
+            // Calculate zoom relative to initial distance
+            if (this.initialTouchDistance > 0) {
+                const scaleRatio = currentDistance / this.initialTouchDistance;
+                const newScale = this.touchStartScale * scaleRatio;
+                this.scale = Math.min(Math.max(newScale, 0.3), 3);
+                this.updateZoomLevel();
+            }
+            
+            // Calculate pan (movement of center point)
+            const dx = currentCenter.x - this.lastTouchCenter.x;
+            const dy = currentCenter.y - this.lastTouchCenter.y;
+            this.offset.x = this.touchStartOffset.x + dx;
+            this.offset.y = this.touchStartOffset.y + dy;
+            
+            this.render();
+            
+            // Update for next move
+            this.lastTouchDistance = currentDistance;
+            this.lastTouchCenter = currentCenter;
+        }
+    }
+
+    handleTouchEnd(e) {
+        if (e.touches.length === 0) {
+            // All fingers lifted
+            this.draggedNode = null;
+            this.isDraggingCanvas = false;
+            this.lastTouchDistance = 0;
+            this.initialTouchDistance = 0;
+        } else if (e.touches.length === 1) {
+            // One finger lifted - reset pinch zoom state
+            this.lastTouchDistance = 0;
+            this.initialTouchDistance = 0;
+            this.touchStartScale = this.scale;
+            this.touchStartOffset = { ...this.offset };
+        }
+    }
+
+    // Pointer Events handlers (more reliable than touch events)
+    handlePointerDown(e) {
+        console.log('=== POINTER DOWN ===', 'type:', e.pointerType, 'id:', e.pointerId);
+        
+        // Only handle touch events, let mouse events be handled by mousedown
+        if (e.pointerType !== 'touch') return;
+        
+        // Track this pointer
+        this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        console.log('Active pointers:', this.activePointers.size);
+        
+        // Check if pinch zoom (2+ pointers)
+        if (this.activePointers.size >= 2) {
+            // Pinch zoom mode
+            const pointers = Array.from(this.activePointers.values());
+            this.lastTouchDistance = this.getDistance(pointers[0], pointers[1]);
+            this.initialTouchDistance = this.lastTouchDistance;
+            this.lastTouchCenter = this.getCenter(pointers[0], pointers[1]);
+            this.touchStartScale = this.scale;
+            this.touchStartOffset = { ...this.offset };
+            console.log('Starting pinch zoom');
+            return;
+        }
+        
+        const rect = this.canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left - this.offset.x) / this.scale;
+        const y = (e.clientY - rect.top - this.offset.y) / this.scale;
+        
+        // Check if touching a node
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        const nodeEl = target?.closest('.node');
+        
+        if (nodeEl) {
+            const nodeId = nodeEl.dataset.id;
+            const node = this.nodes.find(n => n.id === nodeId);
+            
+            // Handle delete button
+            if (target?.classList.contains('delete-btn')) {
+                this.deleteNode(nodeId);
+                e.stopPropagation();
+                return;
+            }
+            
+            // Handle resize handles
+            if (target?.classList.contains('resize-handle')) {
+                const handleEl = target;
+                const resizeHandle = handleEl.dataset.handle;
+                
+                if (node) {
+                    this.resizingNode = nodeId;
+                    this.resizeHandle = resizeHandle;
+                    
+                    // Get current height if it's 'auto'
+                    let currentHeight = node.height || 'auto';
+                    if (currentHeight === 'auto' && nodeEl) {
+                        currentHeight = nodeEl.offsetHeight;
+                    }
+                    
+                    this.resizeStart = {
+                        x: x,
+                        y: y,
+                        width: node.width || 250,
+                        height: currentHeight
+                    };
+                    nodeEl.classList.add('resizing');
+                    e.stopPropagation();
+                    return;
+                }
+            }
+            
+            // Touching a node - select and prepare for dragging
+            console.log('Selecting node:', nodeId);
+            
+            this.selectNode(nodeId);
+            
+            this.draggedNode = nodeId;
+            this.isDraggingCanvas = false;
+            this.dragOffset = {
+                x: x - this.nodes.find(n => n.id === nodeId).x,
+                y: y - this.nodes.find(n => n.id === nodeId).y
+            };
+        } else {
+            // Touching empty space - prepare for canvas panning
+            this.isDraggingCanvas = true;
+            this.draggedNode = null;
+            this.lastMousePos = { x: e.clientX, y: e.clientY };
+            this.selectedNode = null;
+            this.showNodeProperties(null);
+            this.render();
+        }
+    }
+
+    handlePointerMove(e) {
+        // Only handle touch events
+        if (e.pointerType !== 'touch') return;
+        
+        // Update pointer position
+        if (this.activePointers.has(e.pointerId)) {
+            this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        }
+        
+        // Check if pinch zoom (2+ pointers)
+        if (this.activePointers.size >= 2) {
+            e.preventDefault();
+            const pointers = Array.from(this.activePointers.values());
+            const currentDistance = this.getDistance(pointers[0], pointers[1]);
+            const currentCenter = this.getCenter(pointers[0], pointers[1]);
+            
+            // Calculate zoom
+            if (this.initialTouchDistance > 0) {
+                const scaleRatio = currentDistance / this.initialTouchDistance;
+                const newScale = this.touchStartScale * scaleRatio;
+                this.scale = Math.min(Math.max(newScale, 0.3), 3);
+                this.updateZoomLevel();
+            }
+            
+            // Calculate pan
+            const dx = currentCenter.x - this.lastTouchCenter.x;
+            const dy = currentCenter.y - this.lastTouchCenter.y;
+            this.offset.x = this.touchStartOffset.x + dx;
+            this.offset.y = this.touchStartOffset.y + dy;
+            
+            this.render();
+            
+            // Update for next move
+            this.lastTouchDistance = currentDistance;
+            this.lastTouchCenter = currentCenter;
+            return;
+        }
+        
+        const rect = this.canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left - this.offset.x) / this.scale;
+        const y = (e.clientY - rect.top - this.offset.y) / this.scale;
+        
+        if (this.resizingNode) {
+            // Resizing a node
+            e.preventDefault();
+            const node = this.nodes.find(n => n.id === this.resizingNode);
+            if (node) {
+                const dx = x - this.resizeStart.x;
+                const dy = y - this.resizeStart.y;
+                const handle = this.resizeHandle;
+                
+                let newWidth = this.resizeStart.width;
+                let newHeight = this.resizeStart.height;
+                
+                // Вычисляем минимальную высоту на основе количества кнопок
+                const buttonCount = node.buttons ? node.buttons.length : 0;
+                const minHeight = buttonCount > 0 ? (125 + buttonCount * 35) : 150;
+                
+                // Only right (e)
+                if (handle === 'e') {
+                    newWidth = Math.max(200, this.resizeStart.width + dx);
+                }
+                // Only down (s)
+                else if (handle === 's') {
+                    newHeight = Math.max(minHeight, this.resizeStart.height + dy);
+                }
+                // Diagonal right-down (se)
+                else if (handle === 'se') {
+                    newWidth = Math.max(200, this.resizeStart.width + dx);
+                    newHeight = Math.max(minHeight, this.resizeStart.height + dy);
+                }
+                
+                node.width = newWidth;
+                node.height = newHeight;
+                
+                this.render();
+            }
+        } else if (this.draggedNode) {
+            // Dragging a node
+            e.preventDefault();
+            const node = this.nodes.find(n => n.id === this.draggedNode);
+            if (node) {
+                node.x = x - this.dragOffset.x;
+                node.y = y - this.dragOffset.y;
+                this.render();
+            }
+        } else if (this.isDraggingCanvas) {
+            // Panning the canvas
+            e.preventDefault();
+            const dx = e.clientX - this.lastMousePos.x;
+            const dy = e.clientY - this.lastMousePos.y;
+            this.offset.x += dx;
+            this.offset.y += dy;
+            this.lastMousePos = { x: e.clientX, y: e.clientY };
+            this.render();
+        }
+    }
+
+    handlePointerUp(e) {
+        // Only handle touch events
+        if (e.pointerType !== 'touch') return;
+        
+        // Remove pointer from active pointers
+        this.activePointers.delete(e.pointerId);
+        console.log('Pointer up, active:', this.activePointers.size);
+        
+        // Reset pinch zoom state if less than 2 pointers
+        if (this.activePointers.size < 2) {
+            this.lastTouchDistance = 0;
+            this.initialTouchDistance = 0;
+        }
+        
+        // Handle resize end
+        if (this.resizingNode) {
+            const nodeEl = document.querySelector(`.node[data-id="${this.resizingNode}"]`);
+            if (nodeEl) {
+                nodeEl.classList.remove('resizing');
+            }
+            this.resizingNode = null;
+            this.resizeHandle = null;
+            this.render();
+        }
+        
+        this.draggedNode = null;
+        this.isDraggingCanvas = false;
+    }
+    
+    // Helper methods for pinch-zoom with pointers
+    getDistance(p1, p2) {
+        const dx = p1.x - p2.x;
+        const dy = p1.y - p2.y;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    
+    getCenter(p1, p2) {
+        return {
+            x: (p1.x + p2.x) / 2,
+            y: (p1.y + p2.y) / 2
+        };
+    }
     
     zoomIn() {
         this.scale = Math.min(this.scale * 1.2, 3);
@@ -666,10 +1071,13 @@ class FlowEditor {
         this.render();
     }
     selectNode(nodeId) {
+        console.log('=== SELECT NODE ===', 'nodeId:', nodeId);
         this.selectedNode = nodeId;
         const node = this.nodes.find(n => n.id === nodeId);
+        console.log('Node found:', node ? node.id : 'null', 'selectedNode set to:', this.selectedNode);
         this.showNodeProperties(node);
         this.render();
+        console.log('Render completed, selectedNode:', this.selectedNode);
     }
     
     showNodeProperties(node) {
@@ -814,7 +1222,7 @@ class FlowEditor {
                     <label>Текст сообщения:</label>
                     <div class="textarea-with-editor">
                         <textarea id="nodeText">${node.text}</textarea>
-                        <button class="html-editor-btn" onclick="openHtmlEditor('${node.id}')">📝 Редактор</button>
+                        <button class="html-editor-btn" onclick="openMarkdownEditor('${node.id}')">📝 Markdown редактор</button>
                     </div>
                 </div>
                 <div class="property-group">
@@ -1331,8 +1739,14 @@ class FlowEditor {
                 const count = transformations.length;
                 content = `<div class="node-text">${count} трансформаций</div>`;
             } else {
-                // Показываем отформатированный HTML (не экранированный)
-                const textContent = node.text || '';
+                // Показываем отформатированный текст (Markdown преобразуется в HTML)
+                let textContent = node.text || '';
+                
+                // Если формат markdown, преобразуем в HTML
+                if (node.format === 'markdown') {
+                    textContent = this.markdownToHtml(textContent);
+                }
+                
                 const nodeWidth = node.width || 250;
                 
                 // Проверяем, превышает ли текст допустимую длину для текущего размера
@@ -1357,7 +1771,7 @@ class FlowEditor {
                     <span>${icon}</span>
                     ${!node.isStart ? '<button class="delete-btn" data-delete-node="true">🗑️</button>' : ''}
                 </div>
-                <div class="node-content">
+                <div class="node-content${node.buttons && node.buttons.length > 0 ? ' has-buttons' : ''}">
                     ${content}
                     ${node.buttons && node.buttons.length > 0 ? `
                         <div class="node-buttons">
@@ -1546,6 +1960,33 @@ class FlowEditor {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // Преобразование Markdown в HTML для отображения в узлах
+    markdownToHtml(markdown) {
+        if (!markdown) return '';
+        
+        let html = markdown
+            // Экранируем HTML
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            // Жирный текст
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/__(.+?)__/g, '<strong>$1</strong>')
+            // Курсив
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/_(.+?)_/g, '<em>$1</em>')
+            // Зачёркнутый
+            .replace(/~~(.+?)~~/g, '<del>$1</del>')
+            // Моноширинный код
+            .replace(/`(.+?)`/g, '<code>$1</code>')
+            // Ссылки
+            .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank">$1</a>')
+            // Переносы строк
+            .replace(/\n/g, '<br>');
+        
+        return html;
     }
 
     validateConnectivity() {
@@ -2026,10 +2467,7 @@ function updateDebugInfo() {
         const validation = flowEditor.validateConnectivityOriginal();
 
         let debugContent = `
-            <h4 style="margin:0 0 10px 0; color: red; display:flex; justify-content:space-between; align-items:center;">
-                <span>DEBUG INFO</span>
-                <button onclick="toggleDebug()" style="background:#ffcccc; border:1px solid #cc0000; padding:2px 5px; cursor:pointer; margin-left:10px;">X</button>
-            </h4>
+            <h4 style="margin:0 0 10px 0; color: red;">DEBUG INFO</h4>
 
             <div style="margin-bottom: 10px;">
                 <strong>Общая информация:</strong><br>
@@ -2102,10 +2540,7 @@ function updateDebugInfo() {
         debugDiv.innerHTML = debugContent;
     } else {
         debugDiv.innerHTML = `
-            <h4 style="margin:0 0 5px 0; color: red; display:flex; justify-content:space-between; align-items:center;">
-                <span>DEBUG INFO</span>
-                <button onclick="toggleDebug()" style="background:#ffcccc; border:1px solid #cc0000; padding:2px 5px; cursor:pointer; margin-left:10px;">X</button>
-            </h4>
+            <h4 style="margin:0 0 5px 0; color: red;">DEBUG INFO</h4>
             <p>Объект flowEditor не найден</p>
         `;
     }
@@ -2168,33 +2603,18 @@ function createDebugToggleButton() {
         border-radius: 34px;
     `;
 
-    // Add pseudo-element for the slider thumb
-    const sliderThumb = document.createElement('span');
-    sliderThumb.style.cssText = `
-        position: absolute;
-        content: "";
-        height: 20px;
-        width: 20px;
-        left: 3px;
-        bottom: 3px;
-        background-color: white;
-        transition: .4s;
-        border-radius: 50%;
-    `;
-
     // Add debug label
     const debugLabel = document.createElement('span');
-    debugLabel.textContent = 'DBG';
+    debugLabel.textContent = 'DEBUG';
     debugLabel.style.cssText = `
         margin-right: 8px;
         font-family: Arial, sans-serif;
-        font-size: 14px;
-        color: #333;
-        font-weight: bold;
+        font-size: 12px;
+        color: #666;
+        font-weight: normal;
     `;
 
     // Assemble the elements
-    slider.appendChild(sliderThumb);
     sliderSwitch.appendChild(checkbox);
     sliderSwitch.appendChild(slider);
     sliderContainer.appendChild(debugLabel);
@@ -2222,16 +2642,16 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(createDebugToggleButton, 100); // Small delay to ensure DOM is fully loaded
 });
 
-// ========== HTML Editor Functions ==========
+// ========== Markdown Editor Functions ==========
 
-// Открыть HTML редактор
-function openHtmlEditor(nodeId) {
-    const modal = document.getElementById('htmlEditorModal');
-    const editorContent = document.getElementById('htmlEditorContent');
-    const editorCode = document.getElementById('htmlEditorCode');
+// Открыть Markdown редактор
+function openMarkdownEditor(nodeId) {
+    const modal = document.getElementById('markdownEditorModal');
+    const editorContent = document.getElementById('markdownEditorContent');
+    const preview = document.getElementById('markdownPreview');
     
-    if (!modal || !editorContent || !editorCode) {
-        console.error('HTML editor elements not found');
+    if (!modal || !editorContent) {
+        console.error('Markdown editor elements not found');
         return;
     }
     
@@ -2244,35 +2664,14 @@ function openHtmlEditor(nodeId) {
     
     flowEditor.currentEditingNodeId = nodeId;
     
-    // Преобразовать простой текст в HTML для редактора
-    let htmlContent = node.text || '';
+    // Установить содержимое редактора
+    editorContent.value = node.text || '';
     
-    // Если текст содержит HTML теги, используем как есть
-    if (htmlContent.includes('<') && htmlContent.includes('>')) {
-        // Проверяем, есть ли HTML теги
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = htmlContent;
-        if (tempDiv.children.length > 0 || htmlContent.match(/<[a-z][\s\S]*>/i)) {
-            // Это уже HTML
-            editorContent.innerHTML = htmlContent;
-        } else {
-            // Это просто текст с символами < и >
-            editorContent.textContent = htmlContent;
-        }
-    } else {
-        // Простой текст - преобразуем переносы строк в <br>
-        editorContent.innerHTML = htmlContent.replace(/\n/g, '<br>');
-    }
-    
-    // Обновить HTML код в textarea
-    updateHtmlCodePreview();
-    
-    // Сбросить режим на WYSIWYG
-    currentEditorMode = 'wysiwyg';
-    setEditorMode('wysiwyg');
+    // Обновить предпросмотр
+    updateMarkdownPreview();
     
     // Инициализировать счётчик символов
-    updateCharCounter();
+    updateMarkdownCharCounter();
     
     // Показать модальное окно
     modal.classList.add('show');
@@ -2283,138 +2682,162 @@ function openHtmlEditor(nodeId) {
     }, 100);
 }
 
-// Закрыть HTML редактор
-function closeHtmlEditor() {
-    const modal = document.getElementById('htmlEditorModal');
+// Закрыть Markdown редактор
+function closeMarkdownEditor() {
+    const modal = document.getElementById('markdownEditorModal');
     if (modal) {
         modal.classList.remove('show');
     }
     flowEditor.currentEditingNodeId = null;
 }
 
-// Сохранить содержимое HTML редактора
-function saveHtmlEditor() {
-    const editorContent = document.getElementById('htmlEditorContent');
-    const editorCode = document.getElementById('htmlEditorCode');
+// Сохранить содержимое Markdown редактора
+function saveMarkdownEditor() {
+    const editorContent = document.getElementById('markdownEditorContent');
     
-    if (!editorContent || !editorCode) {
-        console.error('Editor elements not found');
+    if (!editorContent) {
+        console.error('Editor element not found');
         return;
     }
     
-    // Получить HTML содержимое из активного режима
-    let htmlContent;
-    if (currentEditorMode === 'html') {
-        // Из режима HTML кода
-        htmlContent = editorCode.value;
-    } else {
-        // Из WYSIWYG режима
-        htmlContent = editorContent.innerHTML;
-    }
-    
-    // Удалить пустые <br> в конце
-    htmlContent = htmlContent.replace(/<br>$/, '');
+    // Получить Markdown содержимое
+    const markdownContent = editorContent.value;
     
     // Обновить текст узла
     if (flowEditor.currentEditingNodeId) {
-        flowEditor.updateNode(flowEditor.currentEditingNodeId, { text: htmlContent });
+        flowEditor.updateNode(flowEditor.currentEditingNodeId, { 
+            text: markdownContent,
+            format: 'markdown'
+        });
         
         // Обновить textarea в свойствах узла
         const nodeText = document.getElementById('nodeText');
         if (nodeText) {
-            nodeText.value = htmlContent;
+            nodeText.value = markdownContent;
         }
     }
     
     // Закрыть редактор
-    closeHtmlEditor();
+    closeMarkdownEditor();
 }
 
-// Форматирование текста
-function formatText(command, value = null) {
-    document.execCommand(command, false, value);
-    updateHtmlCodePreview();
-}
-
-// Вставить ссылку
-function insertLink() {
-    const url = prompt('Введите URL ссылки:');
-    if (url) {
-        document.execCommand('createLink', false, url);
-        updateHtmlCodePreview();
-    }
-}
-
-// Вставить изображение
-function insertImage() {
-    const url = prompt('Введите URL изображения:');
-    if (url) {
-        document.execCommand('insertImage', false, url);
-        updateHtmlCodePreview();
-    }
-}
-
-// Вставить код
-function insertCode() {
-    const code = prompt('Введите код:');
-    if (code) {
-        const codeHtml = `<code>${code}</code>`;
-        document.execCommand('insertHTML', false, codeHtml);
-        updateHtmlCodePreview();
-    }
-}
-
-// Обновить предпросмотр HTML кода (скрыт, но нужен для работы редактора)
-function updateHtmlCodePreview() {
-    const editorContent = document.getElementById('htmlEditorContent');
-    const editorCode = document.getElementById('htmlEditorCode');
+// Вставить Markdown разметку
+function insertMarkdown(type) {
+    const editor = document.getElementById('markdownEditorContent');
+    if (!editor) return;
     
-    if (editorContent && editorCode) {
-        // Форматировать HTML для лучшей читаемости
-        let html = editorContent.innerHTML;
-        // Удалить лишние пробелы и переносы
-        html = html.replace(/\s+/g, ' ').trim();
-        editorCode.value = html;
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const selectedText = editor.value.substring(start, end);
+    let insertion = '';
+    let cursorOffset = 0;
+    
+    switch(type) {
+        case 'bold':
+            insertion = `**${selectedText || 'жирный текст'}**`;
+            cursorOffset = selectedText ? insertion.length : 2;
+            break;
+        case 'italic':
+            insertion = `*${selectedText || 'курсив'}*`;
+            cursorOffset = selectedText ? insertion.length : 1;
+            break;
+        case 'strikethrough':
+            insertion = `~~${selectedText || 'зачёркнутый'}~~`;
+            cursorOffset = selectedText ? insertion.length : 2;
+            break;
+        case 'code':
+            insertion = `\`${selectedText || 'код'}\``;
+            cursorOffset = selectedText ? insertion.length : 1;
+            break;
+        case 'link':
+            const url = prompt('Введите URL ссылки:');
+            if (url) {
+                insertion = `[${selectedText || 'текст ссылки'}](${url})`;
+                cursorOffset = selectedText ? insertion.length : 1;
+            } else {
+                return;
+            }
+            break;
+        case 'ul':
+            insertion = `\n- ${selectedText || 'элемент списка'}`;
+            cursorOffset = insertion.length;
+            break;
+        case 'ol':
+            insertion = `\n1. ${selectedText || 'элемент списка'}`;
+            cursorOffset = insertion.length;
+            break;
     }
+    
+    const newValue = editor.value.substring(0, start) + insertion + editor.value.substring(end);
+    editor.value = newValue;
+    
+    // Установить позицию курсора
+    const newCursorPos = start + cursorOffset;
+    editor.setSelectionRange(newCursorPos, newCursorPos);
+    
+    editor.focus();
+    updateMarkdownPreview();
+    updateMarkdownCharCounter();
 }
 
-// Переменная для отслеживания текущего режима редактора
-let currentEditorMode = 'wysiwyg';
-const MAX_CHAR_LIMIT = 4000;
+// Простая функция для преобразования Markdown в HTML для предпросмотра
+function markdownToHtml(markdown) {
+    if (!markdown) return '';
+    
+    let html = markdown
+        // Экранируем HTML
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        // Жирный текст
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/__(.+?)__/g, '<strong>$1</strong>')
+        // Курсив
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/_(.+?)_/g, '<em>$1</em>')
+        // Зачёркнутый
+        .replace(/~~(.+?)~~/g, '<del>$1</del>')
+        // Моноширинный код
+        .replace(/`(.+?)`/g, '<code>$1</code>')
+        // Ссылки
+        .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank">$1</a>')
+        // Маркированные списки
+        .replace(/^\- (.+)$/gm, '<li>$1</li>')
+        // Нумерованные списки
+        .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+        // Переносы строк
+        .replace(/\n/g, '<br>');
+    
+    // Обернуть списки в ul/ol
+    html = html.replace(/(<li>.*?<\/li>)/g, '<ul>$1</ul>');
+    html = html.replace(/<\/ul><br><ul>/g, '');
+    
+    return html;
+}
 
-// Обновить счётчик символов
-function updateCharCounter() {
-    const editorContent = document.getElementById('htmlEditorContent');
-    const editorCode = document.getElementById('htmlEditorCode');
+// Обновить предпросмотр Markdown
+function updateMarkdownPreview() {
+    const editor = document.getElementById('markdownEditorContent');
+    const preview = document.getElementById('markdownPreview');
+    
+    if (!editor || !preview) return;
+    
+    const markdown = editor.value;
+    preview.innerHTML = markdownToHtml(markdown);
+}
+
+// Обновить счётчик символов для Markdown
+function updateMarkdownCharCounter() {
+    const editor = document.getElementById('markdownEditorContent');
     const charCount = document.getElementById('charCount');
     const charLimitWarning = document.getElementById('charLimitWarning');
     const counterContainer = document.querySelector('.editor-char-counter');
     
-    if (!charCount || !charLimitWarning || !counterContainer) {
+    if (!charCount || !charLimitWarning || !counterContainer || !editor) {
         return;
     }
     
-    let currentLength = 0;
-    
-    // Всегда считаем количество символов в HTML-версии текста,
-    // так как именно HTML отправляется на сервер
-    if (currentEditorMode === 'html') {
-        // В режиме HTML кода берём напрямую из textarea
-        currentLength = editorCode ? editorCode.value.length : 0;
-    } else {
-        // В WYSIWYG режиме нужно синхронизировать HTML код и взять его длину
-        if (editorContent && editorCode) {
-            // Синхронизируем HTML код перед подсчётом
-            let html = editorContent.innerHTML;
-            // Форматируем так же, как в updateHtmlCodePreview
-            html = html.replace(/\s+/g, ' ').trim();
-            currentLength = html.length;
-        } else if (editorCode) {
-            // Если editorContent недоступен, берём из editorCode
-            currentLength = editorCode.value.length;
-        }
-    }
-    
+    const currentLength = editor.value.length;
     charCount.textContent = currentLength;
     
     // Обновить стили в зависимости от количества символов
@@ -2431,200 +2854,58 @@ function updateCharCounter() {
     }
 }
 
-// Проверить и ограничить ввод при превышении лимита
-function enforceCharLimit(element, isContentEditable = false) {
-    let currentHtmlLength = 0;
-    
-    if (isContentEditable) {
-        // Для WYSIWYG режима считаем длину HTML после форматирования
-        let html = element.innerHTML;
-        html = html.replace(/\s+/g, ' ').trim();
-        currentHtmlLength = html.length;
-    } else {
-        // Для HTML режима считаем длину значения textarea
-        currentHtmlLength = element.value.length;
-    }
-    
-    if (currentHtmlLength > MAX_CHAR_LIMIT) {
-        if (isContentEditable) {
-            // Для contenteditable сложно корректно обрезать HTML без нарушения структуры
-            // Поэтому просто предотвращаем дальнейший ввод через обработчик keydown
-            // Но если уже превысили лимит, пытаемся открутить последнее изменение
-            const selection = window.getSelection();
-            if (selection.rangeCount > 0) {
-                document.execCommand('undo', false, null);
-            }
-        } else {
-            // Для textarea просто обрезаем значение
-            element.value = element.value.substring(0, MAX_CHAR_LIMIT);
-        }
-        
-        updateCharCounter();
-        return false;
-    }
-    return true;
-}
+const MAX_CHAR_LIMIT = 4000;
 
-// Переключение режима редактирования (WYSIWYG <-> HTML код)
-function setEditorMode(mode) {
-    const wysiwygBtn = document.getElementById('wysiwygModeBtn');
-    const htmlBtn = document.getElementById('htmlModeBtn');
-    const editorContent = document.getElementById('htmlEditorContent');
-    const editorCode = document.getElementById('htmlEditorCode');
-    const editorToolbar = document.getElementById('editorToolbar');
-    const htmlCodeEditor = document.getElementById('htmlCodeEditor');
-    
-    if (!wysiwygBtn || !htmlBtn || !editorContent || !editorCode || !editorToolbar || !htmlCodeEditor) {
-        console.error('Editor elements not found');
-        return;
-    }
-    
-    currentEditorMode = mode;
-    
-    if (mode === 'wysiwyg') {
-        // Переключение на WYSIWYG режим
-        wysiwygBtn.classList.add('active');
-        htmlBtn.classList.remove('active');
-        
-        // Синхронизация: обновляем WYSIWYG из HTML кода
-        editorContent.innerHTML = editorCode.value;
-        
-        // Показываем WYSIWYG редактор и панель инструментов
-        editorContent.style.display = 'block';
-        editorToolbar.style.display = 'flex';
-        htmlCodeEditor.style.display = 'none';
-    } else {
-        // Переключение на HTML код режим
-        wysiwygBtn.classList.remove('active');
-        htmlBtn.classList.add('active');
-        
-        // Синхронизация: обновляем HTML код из WYSIWYG
-        updateHtmlCodePreview();
-        
-        // Показываем редактор HTML кода, скрываем панель инструментов
-        editorContent.style.display = 'none';
-        editorToolbar.style.display = 'none';
-        htmlCodeEditor.style.display = 'block';
-        
-        // Фокус на редакторе кода
-        setTimeout(() => {
-            editorCode.focus();
-        }, 100);
-    }
-    
-    // Обновить счётчик символов после переключения режима
-    updateCharCounter();
-}
-
-// Обработчик событий для редактора
+// Обработчик событий для Markdown редактора
 document.addEventListener('DOMContentLoaded', () => {
-    const editorContent = document.getElementById('htmlEditorContent');
-    const editorCode = document.getElementById('htmlEditorCode');
+    const editorContent = document.getElementById('markdownEditorContent');
     
     if (editorContent) {
-        // Обновлять HTML код и счётчик символов при изменении содержимого WYSIWYG
+        // Обновлять предпросмотр и счётчик символов при изменении содержимого
         editorContent.addEventListener('input', () => {
-            if (currentEditorMode === 'wysiwyg') {
-                enforceCharLimit(editorContent, true);
-                updateHtmlCodePreview();
-                updateCharCounter();
+            // Проверить лимит символов
+            if (editorContent.value.length > MAX_CHAR_LIMIT) {
+                editorContent.value = editorContent.value.substring(0, MAX_CHAR_LIMIT);
             }
+            updateMarkdownPreview();
+            updateMarkdownCharCounter();
         });
         
-        // Обработка вставки текста
-        editorContent.addEventListener('paste', (e) => {
-            // Получить вставленный текст
-            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
-            let hasHtml = false;
-            
-            for (let index in items) {
-                const item = items[index];
-                if (item.kind === 'string' && item.type === 'text/html') {
-                    hasHtml = true;
-                    break;
-                }
-            }
-            
-            // Если есть HTML формат, используем его
-            if (hasHtml) {
-                e.preventDefault();
-                const html = (e.clipboardData || e.originalEvent.clipboardData).getData('text/html');
-                document.execCommand('insertHTML', false, html);
-            }
-            
-            setTimeout(() => {
-                if (currentEditorMode === 'wysiwyg') {
-                    enforceCharLimit(editorContent, true);
-                    updateHtmlCodePreview();
-                    updateCharCounter();
-                }
-            }, 100);
-        });
-        
-        // Обработка клавиш в WYSIWYG режиме
+        // Обработка клавиш в Markdown редакторе
         editorContent.addEventListener('keydown', (e) => {
             // Проверить лимит перед вводом (кроме специальных клавиш)
             if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1) {
-                // Проверяем длину HTML, а не просто текста
-                let html = editorContent.innerHTML;
-                html = html.replace(/\s+/g, ' ').trim();
-                if (html.length >= MAX_CHAR_LIMIT) {
+                if (editorContent.value.length >= MAX_CHAR_LIMIT) {
                     e.preventDefault();
                     return;
                 }
             }
             
-            // Ctrl+Enter для сохранения
-            if (e.ctrlKey && e.key === 'Enter') {
-                e.preventDefault();
-                saveHtmlEditor();
-            }
-            // Esc для закрытия
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                closeHtmlEditor();
-            }
-        });
-    }
-    
-    if (editorCode) {
-        // Обновлять счётчик символов при изменении HTML кода
-        editorCode.addEventListener('input', () => {
-            if (currentEditorMode === 'html') {
-                enforceCharLimit(editorCode, false);
-                updateCharCounter();
-            }
-        });
-        
-        // Обработка клавиш в HTML код режиме
-        editorCode.addEventListener('keydown', (e) => {
-            // Ctrl+Enter для сохранения
-            if (e.ctrlKey && e.key === 'Enter') {
-                e.preventDefault();
-                saveHtmlEditor();
-            }
-            // Esc для закрытия
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                closeHtmlEditor();
-            }
             // Tab для вставки табуляции (вместо перехода фокуса)
             if (e.key === 'Tab') {
                 e.preventDefault();
-                const start = editorCode.selectionStart;
-                const end = editorCode.selectionEnd;
-                const newValue = editorCode.value.substring(0, start) + '    ' + editorCode.value.substring(end);
+                const start = editorContent.selectionStart;
+                const end = editorContent.selectionEnd;
+                const newValue = editorContent.value.substring(0, start) + '    ' + editorContent.value.substring(end);
                 
-                // Проверить лимит
                 if (newValue.length <= MAX_CHAR_LIMIT) {
-                    editorCode.value = newValue;
-                    editorCode.selectionStart = editorCode.selectionEnd = start + 4;
-                    updateCharCounter();
+                    editorContent.value = newValue;
+                    editorContent.selectionStart = editorContent.selectionEnd = start + 4;
+                    updateMarkdownPreview();
+                    updateMarkdownCharCounter();
                 }
+            }
+            
+            // Ctrl+Enter для сохранения
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                saveMarkdownEditor();
+            }
+            // Esc для закрытия
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeMarkdownEditor();
             }
         });
     }
-    
-    // Закрытие модального окна только по кнопке закрытия или Escape
-    // Клик вне модального окна больше не закрывает его
 });

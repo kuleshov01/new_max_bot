@@ -58,49 +58,49 @@
         </div>
     </div>
     
-    <!-- Модальное окно HTML редактора -->
-    <div id="htmlEditorModal" class="modal">
+    <!-- Модальное окно Markdown редактора -->
+    <div id="markdownEditorModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>📝 Редактор форматированного текста</h3>
-                <button class="modal-close" onclick="closeHtmlEditor()">&times;</button>
+                <h3>📝 Редактор Markdown</h3>
+                <button class="modal-close" onclick="closeMarkdownEditor()">&times;</button>
             </div>
             <div class="modal-body">
-                <!-- Переключатель режима редактирования -->
-                <div class="editor-mode-toggle">
-                    <button class="mode-toggle-btn active" id="wysiwygModeBtn" onclick="setEditorMode('wysiwyg')">
-                        📝 Визуальный редактор
-                    </button>
-                    <button class="mode-toggle-btn" id="htmlModeBtn" onclick="setEditorMode('html')">
-                        &lt;/&gt; HTML код
-                    </button>
+                <!-- Панель инструментов Markdown -->
+                <div class="editor-toolbar" id="markdownToolbar">
+                    <button class="toolbar-btn" onclick="insertMarkdown('bold')" title="Жирный"><b>B</b></button>
+                    <button class="toolbar-btn" onclick="insertMarkdown('italic')" title="Курсив"><i>I</i></button>
+                    <button class="toolbar-btn" onclick="insertMarkdown('strikethrough')" title="Зачёркнутый"><s>S</s></button>
+                    <div class="toolbar-divider"></div>
+                    <button class="toolbar-btn" onclick="insertMarkdown('code')" title="Моноширинный">&lt;/&gt;</button>
+                    <button class="toolbar-btn" onclick="insertMarkdown('link')" title="Ссылка">🔗</button>
+                    <div class="toolbar-divider"></div>
+                    <button class="toolbar-btn" onclick="insertMarkdown('ul')" title="Маркированный список">•</button>
+                    <button class="toolbar-btn" onclick="insertMarkdown('ol')" title="Нумерованный список">1.</button>
                 </div>
                 
-                <!-- Панель инструментов (только для визуального режима) -->
-                <div class="editor-toolbar" id="editorToolbar">
-                    <button class="toolbar-btn" onclick="formatText('bold')" title="Жирный"><b>B</b></button>
-                    <button class="toolbar-btn" onclick="formatText('italic')" title="Курсив"><i>I</i></button>
-                    <button class="toolbar-btn" onclick="formatText('underline')" title="Подчёркнутый"><u>U</u></button>
-                    <button class="toolbar-btn" onclick="formatText('strikeThrough')" title="Зачёркнутый"><s>S</s></button>
-                    <div class="toolbar-divider"></div>
-                    <button class="toolbar-btn" onclick="formatText('justifyLeft')" title="По левому краю">⬅️</button>
-                    <button class="toolbar-btn" onclick="formatText('justifyCenter')" title="По центру">⬆️</button>
-                    <button class="toolbar-btn" onclick="formatText('justifyRight')" title="По правому краю">➡️</button>
-                    <div class="toolbar-divider"></div>
-                    <button class="toolbar-btn" onclick="formatText('insertUnorderedList')" title="Маркированный список">•</button>
-                    <button class="toolbar-btn" onclick="formatText('insertOrderedList')" title="Нумерованный список">1.</button>
-                    <div class="toolbar-divider"></div>
-                    <button class="toolbar-btn" onclick="insertLink()" title="Вставить ссылку">🔗</button>
-                    <button class="toolbar-btn" onclick="insertImage()" title="Вставить изображение">🖼️</button>
-                    <button class="toolbar-btn" onclick="insertCode()" title="Вставить код">&lt;/&gt;</button>
+                <!-- Редактор Markdown -->
+                <textarea id="markdownEditorContent" class="editor-code" placeholder="Введите Markdown здесь..." maxlength="4000"></textarea>
+                
+                <!-- Предпросмотр -->
+                <div class="markdown-preview-wrapper">
+                    <div class="preview-header">Предпросмотр:</div>
+                    <div id="markdownPreview" class="markdown-preview"></div>
                 </div>
                 
-                <!-- Визуальный редактор -->
-                <div id="htmlEditorContent" class="editor-content" contenteditable="true" placeholder="Введите текст здесь..."></div>
-                
-                <!-- Редактор HTML кода -->
-                <div id="htmlCodeEditor" class="editor-code-wrapper" style="display: none;">
-                    <textarea id="htmlEditorCode" class="editor-code" placeholder="Введите HTML код здесь..." maxlength="4000"></textarea>
+                <!-- Справка по Markdown -->
+                <div class="markdown-help">
+                    <details>
+                        <summary>📖 Справка по Markdown</summary>
+                        <div class="help-content">
+                            <p><b>Жирный:</b> <code>**текст**</code> или <code>__текст__</code></p>
+                            <p><i>Курсив:</i> <code>*текст*</code> или <code>_текст_</code></p>
+                            <p><s>Зачёркнутый:</s> <code>~~текст~~</code></p>
+                            <p><code>Моноширинный:</code> <code>`код`</code></p>
+                            <p>🔗 Ссылка: <code>[текст](URL)</code></p>
+                            <p>@упоминание: <code>"text": "[Имя Фамилия](max://user/user_id)"</code></p>
+                        </div>
+                    </details>
                 </div>
                 
                 <!-- Счётчик символов -->
@@ -110,8 +110,8 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-action" onclick="saveHtmlEditor()">✅ Сохранить</button>
-                <button class="btn btn-mode" onclick="closeHtmlEditor()">❌ Отмена</button>
+                <button class="btn btn-action" onclick="saveMarkdownEditor()">✅ Сохранить</button>
+                <button class="btn btn-mode" onclick="closeMarkdownEditor()">❌ Отмена</button>
             </div>
         </div>
     </div>
