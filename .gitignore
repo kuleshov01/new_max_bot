@@ -16,6 +16,9 @@ venv/
 env/
 ENV/
 
+# Node.js зависимости (корень проекта)
+node_modules/
+
 # Файлы IDE
 .vscode/
 .idea/
@@ -31,3 +34,13 @@ ENV/
 *.sqlite
 *.sqlite3
 data/db/
+
+# Playwright и тесты UI
+tests/ui/node_modules/
+tests/ui/playwright-report/
+tests/ui/test-results/
+tests/ui/package-lock.json
+tests/ui/.cache/
+tests/ui/ms-playwright/
+tests/ui/.cache/ms-playwright/
+ms-playwright/

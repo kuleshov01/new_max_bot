@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Редактор диалоговых потоков</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/flow.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/flow.css') }}?v=9">
 </head>
 <body>
     <div id="app">
@@ -33,6 +33,14 @@
                 <h4>Режим работы</h4>
                 <button class="btn btn-mode active" id="modeEdit" onclick="setMode('edit')">✏️ Редактирование</button>
                 <button class="btn btn-mode" id="modeConnect" onclick="setMode('connect')">🔗 Рисование связей</button>
+                <button class="btn btn-action" id="btnDeleteConnection" onclick="deleteSelectedConnection()" style="display: none; margin-top: 10px;">🗑️ Удалить выделенную связь</button>
+                <div class="help-box" style="margin-top: 10px;">
+                    <div class="help-box-title">Удаление связей:</div>
+                    <div>• Кликните на связь для выделения</div>
+                    <div>• Нажмите <b>Delete</b> или кнопку выше</div>
+                    <div>• Или нажмите <b>×</b> на связи</div>
+                    <div>• Или правый клик на связь</div>
+                </div>
             </div>
             
             <div class="sidebar-section">
@@ -116,10 +124,16 @@
         </div>
     </div>
 
+    <!-- Контекстное меню для связей -->
+    <div id="connectionContextMenu" class="context-menu" style="display: none;">
+        <div class="context-menu-item" onclick="deleteSelectedConnection()">🗑️ Удалить связь</div>
+        <div class="context-menu-item" onclick="addControlPoint()">➕ Добавить опорную точку</div>
+    </div>
+
     <script>
         // Set the base URL for API calls
         window.API_BASE_URL = '{{ base_url }}';
     </script>
-    <script src="{{ url_for('static', filename='js/flow.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/flow.js') }}?v=11"></script>
 </body>
 </html>

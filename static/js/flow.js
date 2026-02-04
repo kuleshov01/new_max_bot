@@ -14,10 +14,15 @@ class FlowEditor {
         this.currentBotId = null;
         this.mode = 'edit';
         this.DEBUG_ENABLED = true;
+        this.selectedConnection = null;
+        this.controlPoints = {}; // Опорные точки для изгиба линий
+        this.draggedControlPoint = null;
+        this.draggedPointStart = null;
         this.resizingNode = null;
         this.resizeHandle = null;
         this.resizeStart = { x: 0, y: 0, width: 0, height: 0 };
         this.currentEditingNodeId = null;
+        this.connectionClicked = false; // Флаг для предотвращения сброса выделения связи
         
         // Touch support properties
         this.lastTouchDistance = 0;
@@ -138,6 +143,10 @@ class FlowEditor {
         document.addEventListener('keydown', this.handleKeyDown.bind(this));
         
         this.botSelect.addEventListener('change', this.handleBotChange.bind(this));
+        
+        // Обработчик клика по связям (делегирование через document для надежности)
+        document.addEventListener('click', this.handleConnectionClick.bind(this));
+        document.addEventListener('contextmenu', this.handleConnectionRightClick.bind(this));
     }
     
     createStartNode() {
@@ -286,6 +295,32 @@ class FlowEditor {
         this.render();
     }
     
+    deleteConnection(connectionId) {
+        const connection = this.connections.find(c => c.id === connectionId);
+        if (!connection) return;
+
+        // Если связь имеет buttonId, нужно также очистить nextNodeId в кнопке
+        if (connection.buttonId) {
+            const fromNode = this.nodes.find(n => n.id === connection.from);
+            if (fromNode && fromNode.buttons) {
+                const button = fromNode.buttons.find(b => b.id === connection.buttonId);
+                if (button) {
+                    button.nextNodeId = null;
+                }
+            }
+        }
+
+        this.connections = this.connections.filter(c => c.id !== connectionId);
+
+        if (this.selectedConnection === connectionId) {
+            console.log('=== DELETE CONNECTION ===', 'clearing selectedConnection:', this.selectedConnection);
+            this.selectedConnection = null;
+            this.updateDeleteConnectionButton();
+        }
+
+        this.render();
+    }
+    
     addConnection(buttonId, toNodeId, fromNodeId) {
         this.connections = this.connections.filter(c => c.buttonId !== buttonId);
 
@@ -390,6 +425,34 @@ class FlowEditor {
         const rect = this.canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left - this.offset.x) / this.scale;
         const y = (e.clientY - rect.top - this.offset.y) / this.scale;
+
+        console.log('=== MOUSE DOWN ===', 'target:', e.target.tagName, 'classList:', Array.from(e.target.classList), 'connectionClicked:', this.connectionClicked);
+
+        // Check if clicking on a connection line (highest priority)
+        const connectionEl = e.target.closest('.connection-line');
+        if (connectionEl) {
+            const connectionId = connectionEl.dataset.connectionId;
+            console.log('=== MOUSE DOWN ON CONNECTION ===', 'connectionId:', connectionId);
+            
+            if (connectionId) {
+                this.selectConnection(connectionId);
+                // Показываем контекстное меню для связи
+                this.showContextMenu(e.clientX, e.clientY, 'connection');
+            }
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return;
+        }
+
+        // Если connectionClicked установлен, значит pointerdown уже обработал клик на связь
+        // Не сбрасываем выделение
+        if (this.connectionClicked) {
+            console.log('=== SKIPPING MOUSE DOWN - CONNECTION CLICKED ===');
+            this.connectionClicked = false; // Сбрасываем флаг
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return;
+        }
 
         // Handle resize
         if (e.target.classList.contains('resize-handle')) {
@@ -528,8 +591,11 @@ class FlowEditor {
         } else {
             this.isDraggingCanvas = true;
             this.lastMousePos = { x: e.clientX, y: e.clientY };
+            console.log('=== TOUCH EMPTY SPACE ===', 'clearing selectedConnection:', this.selectedConnection);
             this.selectedNode = null;
+            this.selectedConnection = null; // Снимаем выделение со связи
             this.showNodeProperties(null);
+            this.updateDeleteConnectionButton();
             this.render();
         }
     }
@@ -554,21 +620,37 @@ class FlowEditor {
         const rect = this.canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left - this.offset.x) / this.scale;
         const y = (e.clientY - rect.top - this.offset.y) / this.scale;
-        
+
+        // Обработка перетаскивания опорной точки
+        if (this.draggedControlPoint) {
+            const dx = (e.clientX - this.draggedPointStart.x) / this.scale;
+            const dy = (e.clientY - this.draggedPointStart.y) / this.scale;
+
+            const points = this.controlPoints[this.draggedControlPoint.connectionId];
+            const point = points.find(p => p.id === this.draggedControlPoint.pointId);
+            if (point) {
+                point.x += dx;
+                point.y += dy;
+                this.draggedPointStart = { x: e.clientX, y: e.clientY };
+                this.render();
+            }
+            return;
+        }
+
         if (this.resizingNode) {
             const node = this.nodes.find(n => n.id === this.resizingNode);
             if (node) {
                 const dx = x - this.resizeStart.x;
                 const dy = y - this.resizeStart.y;
                 const handle = this.resizeHandle;
-                
+
                 let newWidth = this.resizeStart.width;
                 let newHeight = this.resizeStart.height;
-                
+
                 // Вычисляем минимальную высоту на основе количества кнопок
                 const buttonCount = node.buttons ? node.buttons.length : 0;
                 const minHeight = buttonCount > 0 ? (125 + buttonCount * 35) : 150;
-                
+
                 // Только вправо (e)
                 if (handle === 'e') {
                     newWidth = Math.max(200, this.resizeStart.width + dx);
@@ -582,10 +664,10 @@ class FlowEditor {
                     newWidth = Math.max(200, this.resizeStart.width + dx);
                     newHeight = Math.max(minHeight, this.resizeStart.height + dy);
                 }
-                
+
                 node.width = newWidth;
                 node.height = newHeight;
-                
+
                 this.render();
             }
         } else if (this.draggedConnector) {
@@ -611,6 +693,12 @@ class FlowEditor {
     }
     
     handleCanvasMouseUp(e) {
+        if (this.draggedControlPoint) {
+            this.draggedControlPoint = null;
+            this.draggedPointStart = null;
+            return;
+        }
+
         if (this.resizingNode) {
             const nodeEl = document.querySelector(`.node[data-id="${this.resizingNode}"]`);
             if (nodeEl) {
@@ -620,7 +708,7 @@ class FlowEditor {
             this.resizeHandle = null;
             this.render();
         }
-        
+
         if (this.draggedConnector) {
             const target = e.target.closest('.node');
             if (target) {
@@ -788,15 +876,12 @@ class FlowEditor {
     handlePointerDown(e) {
         console.log('=== POINTER DOWN ===', 'type:', e.pointerType, 'id:', e.pointerId);
         
-        // Only handle touch events, let mouse events be handled by mousedown
-        if (e.pointerType !== 'touch') return;
-        
-        // Track this pointer
+        // Track this pointer for both mouse and touch
         this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         console.log('Active pointers:', this.activePointers.size);
         
-        // Check if pinch zoom (2+ pointers)
-        if (this.activePointers.size >= 2) {
+        // Check if pinch zoom (2+ pointers) - only for touch
+        if (e.pointerType === 'touch' && this.activePointers.size >= 2) {
             // Pinch zoom mode
             const pointers = Array.from(this.activePointers.values());
             this.lastTouchDistance = this.getDistance(pointers[0], pointers[1]);
@@ -812,9 +897,27 @@ class FlowEditor {
         const x = (e.clientX - rect.left - this.offset.x) / this.scale;
         const y = (e.clientY - rect.top - this.offset.y) / this.scale;
         
-        // Check if touching a node
+        // Check if touching a connection or node
         const target = document.elementFromPoint(e.clientX, e.clientY);
+        const connectionEl = target?.closest('.connection-line');
         const nodeEl = target?.closest('.node');
+        
+        // Check if touching a connection first (works for both mouse and touch)
+        if (connectionEl) {
+            const connectionId = connectionEl.dataset.connectionId;
+            console.log('=== POINTER DOWN ON CONNECTION ===', 'connectionId:', connectionId, 'pointerType:', e.pointerType);
+            
+            if (connectionId && window.flowEditor) {
+                window.flowEditor.selectConnection(connectionId);
+                // Показываем контекстное меню для связи
+                window.flowEditor.showContextMenu(e.clientX, e.clientY, 'connection');
+                // Устанавливаем флаг, чтобы предотвратить сброс выделения в handleCanvasMouseDown
+                this.connectionClicked = true;
+            }
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return;
+        }
         
         if (nodeEl) {
             const nodeId = nodeEl.dataset.id;
@@ -866,27 +969,27 @@ class FlowEditor {
                 y: y - this.nodes.find(n => n.id === nodeId).y
             };
         } else {
+            console.log('=== POINTER DOWN ON EMPTY SPACE ===', 'clearing selectedConnection:', this.selectedConnection);
             // Touching empty space - prepare for canvas panning
             this.isDraggingCanvas = true;
             this.draggedNode = null;
             this.lastMousePos = { x: e.clientX, y: e.clientY };
             this.selectedNode = null;
+            this.selectedConnection = null; // Снимаем выделение со связи
             this.showNodeProperties(null);
+            this.updateDeleteConnectionButton();
             this.render();
         }
     }
 
     handlePointerMove(e) {
-        // Only handle touch events
-        if (e.pointerType !== 'touch') return;
-        
-        // Update pointer position
+        // Update pointer position for both mouse and touch
         if (this.activePointers.has(e.pointerId)) {
             this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         }
         
-        // Check if pinch zoom (2+ pointers)
-        if (this.activePointers.size >= 2) {
+        // Check if pinch zoom (2+ pointers) - only for touch
+        if (e.pointerType === 'touch' && this.activePointers.size >= 2) {
             e.preventDefault();
             const pointers = Array.from(this.activePointers.values());
             const currentDistance = this.getDistance(pointers[0], pointers[1]);
@@ -975,15 +1078,12 @@ class FlowEditor {
     }
 
     handlePointerUp(e) {
-        // Only handle touch events
-        if (e.pointerType !== 'touch') return;
-        
-        // Remove pointer from active pointers
+        // Remove pointer from active pointers (both mouse and touch)
         this.activePointers.delete(e.pointerId);
-        console.log('Pointer up, active:', this.activePointers.size);
+        console.log('=== POINTER UP ===', 'pointerType:', e.pointerType, 'active:', this.activePointers.size, 'selectedConnection:', this.selectedConnection);
         
-        // Reset pinch zoom state if less than 2 pointers
-        if (this.activePointers.size < 2) {
+        // Reset pinch zoom state if less than 2 pointers (only for touch)
+        if (e.pointerType === 'touch' && this.activePointers.size < 2) {
             this.lastTouchDistance = 0;
             this.initialTouchDistance = 0;
         }
@@ -1043,8 +1143,144 @@ class FlowEditor {
     }
     
     handleKeyDown(e) {
-        if (e.key === 'Delete' && this.selectedNode && this.selectedNode !== 'start') {
-            this.deleteNode(this.selectedNode);
+        if (e.key === 'Delete') {
+            // Сначала проверяем выделенную связь
+            if (this.selectedConnection) {
+                this.deleteConnection(this.selectedConnection);
+                e.preventDefault();
+            }
+            // Затем проверяем выделенный узел
+            else if (this.selectedNode && this.selectedNode !== 'start') {
+                this.deleteNode(this.selectedNode);
+                e.preventDefault();
+            }
+        }
+    }
+    
+    handleConnectionClick(e) {
+        console.log('=== CONNECTION CLICK ===', 'target:', e.target.tagName, 'classList:', Array.from(e.target.classList), 'pointerType:', e.pointerType);
+        
+        // Игнорируем клики на интерактивных элементах
+        if (e.target.closest('.node') ||
+            e.target.closest('.btn') ||
+            e.target.closest('.sidebar') ||
+            e.target.closest('.zoom-controls') ||
+            e.target.closest('.context-menu') ||
+            e.target.closest('.modal')) {
+            console.log('Click ignored - on interactive element');
+            return;
+        }
+        
+        // Проверяем, что клик был именно на связи, а не на других элементах
+        const path = e.target.closest('.connection-line');
+        console.log('Path found:', path);
+        
+        if (path) {
+            const connectionId = path.dataset.connectionId;
+            console.log('Connection ID:', connectionId);
+            if (connectionId) {
+                e.stopPropagation();
+                e.preventDefault();
+                // Используем глобальный flowEditor вместо this
+                if (window.flowEditor) {
+                    window.flowEditor.selectConnection(connectionId);
+                    // Сразу показываем контекстное меню
+                    console.log('Showing context menu at:', e.clientX, e.clientY);
+                    window.flowEditor.showContextMenu(e.clientX, e.clientY);
+                } else {
+                    console.error('flowEditor not available');
+                }
+            }
+        } else {
+            console.log('Click not on connection, checking if menu should be closed...');
+            // Если клик не на связи и не на интерактивных элементах, закрываем контекстное меню
+            const menu = document.getElementById('connectionContextMenu');
+            if (menu && menu.style.display === 'block' && !menu.contains(e.target)) {
+                console.log('Closing menu by outside click');
+                menu.style.display = 'none';
+                menu.style.visibility = 'hidden';
+            }
+        }
+    }
+    
+    handleConnectionRightClick(e) {
+        console.log('=== CONNECTION RIGHT CLICK ===', 'target:', e.target.tagName, 'classList:', Array.from(e.target.classList));
+        
+        // Игнорируем клики на интерактивных элементах
+        if (e.target.closest('.node') ||
+            e.target.closest('.btn') ||
+            e.target.closest('.sidebar') ||
+            e.target.closest('.zoom-controls') ||
+            e.target.closest('.context-menu') ||
+            e.target.closest('.modal')) {
+            console.log('Right click ignored - on interactive element');
+            return;
+        }
+        
+        const path = e.target.closest('.connection-line');
+        if (path) {
+            const connectionId = path.dataset.connectionId;
+            if (connectionId) {
+                e.preventDefault();
+                e.stopPropagation();
+                // Используем глобальный flowEditor вместо this
+                if (window.flowEditor) {
+                    window.flowEditor.selectConnection(connectionId);
+                    // Правый клик также показывает контекстное меню
+                    console.log('Showing context menu at:', e.clientX, e.clientY);
+                    window.flowEditor.showContextMenu(e.clientX, e.clientY);
+                } else {
+                    console.error('flowEditor not available');
+                }
+            }
+        }
+    }
+
+    showContextMenu(x, y) {
+        console.log('=== SHOW CONTEXT MENU ===', 'x:', x, 'y:', y);
+        const menu = document.getElementById('connectionContextMenu');
+        if (menu) {
+            // Устанавливаем позицию меню
+            menu.style.left = x + 'px';
+            menu.style.top = y + 'px';
+            
+            // Показываем меню
+            menu.style.display = 'block';
+            menu.style.visibility = 'visible';
+            
+            const menuRect = menu.getBoundingClientRect();
+            console.log('Menu shown at:', x, y, 'actual position:', menuRect.left, menuRect.top, 'size:', menuRect.width, menuRect.height);
+            console.log('Menu display:', menu.style.display, 'visibility:', menu.style.visibility);
+
+            // Сначала удаляем старые обработчики, если есть
+            const oldHandler = menu._closeMenuHandler;
+            if (oldHandler) {
+                document.removeEventListener('click', oldHandler);
+            }
+
+            // Закрытие меню при клике вне его
+            const closeMenu = (e) => {
+                console.log('Close menu clicked, target:', e.target, 'menu contains:', menu.contains(e.target));
+                
+                if (!menu.contains(e.target)) {
+                    menu.style.display = 'none';
+                    menu.style.visibility = 'hidden';
+                    document.removeEventListener('click', closeMenu);
+                    menu._closeMenuHandler = null;
+                    console.log('Menu closed');
+                }
+            };
+            
+            // Сохраняем ссылку на обработчик для возможности удаления
+            menu._closeMenuHandler = closeMenu;
+            
+            // Добавляем обработчик с задержкой, чтобы текущий клик не закрывал меню
+            setTimeout(() => {
+                document.addEventListener('click', closeMenu);
+                console.log('Close menu handler attached');
+            }, 100);
+        } else {
+            console.error('Context menu element not found!');
         }
     }
     
@@ -1071,13 +1307,70 @@ class FlowEditor {
         this.render();
     }
     selectNode(nodeId) {
-        console.log('=== SELECT NODE ===', 'nodeId:', nodeId);
+        console.log('=== SELECT NODE ===', 'nodeId:', nodeId, 'was clearing selectedConnection:', this.selectedConnection);
         this.selectedNode = nodeId;
+        this.selectedConnection = null; // Снимаем выделение со связи при выборе узла
         const node = this.nodes.find(n => n.id === nodeId);
-        console.log('Node found:', node ? node.id : 'null', 'selectedNode set to:', this.selectedNode);
+        console.log('Node found:', node ? node.id : 'null', 'selectedNode set to:', this.selectedNode, 'selectedConnection cleared');
         this.showNodeProperties(node);
+        this.updateDeleteConnectionButton();
         this.render();
-        console.log('Render completed, selectedNode:', this.selectedNode);
+        console.log('=== NODE SELECTED ===', 'selectedNode:', this.selectedNode, 'selectedConnection:', this.selectedConnection);
+    }
+    
+    selectConnection(connectionId) {
+        console.log('=== SELECT CONNECTION ===', 'connectionId:', connectionId);
+        this.selectedConnection = connectionId;
+        this.selectedNode = null; // Снимаем выделение с узла при выборе связи
+        this.showNodeProperties(null);
+        this.updateDeleteConnectionButton();
+        this.render();
+        console.log('=== CONNECTION SELECTED ===', 'selectedConnection:', this.selectedConnection, 'selectedNode:', this.selectedNode);
+    }
+    
+    updateDeleteConnectionButton() {
+        const btn = document.getElementById('btnDeleteConnection');
+        if (btn) {
+            btn.style.display = this.selectedConnection ? 'block' : 'none';
+        }
+    }
+
+    addControlPointToConnection(connectionId) {
+        const connection = this.connections.find(c => c.id === connectionId);
+        if (!connection) return;
+
+        // Инициализируем массив опорных точек для этой связи
+        if (!this.controlPoints[connectionId]) {
+            this.controlPoints[connectionId] = [];
+        }
+
+        // Вычисляем середину линии для опорной точки
+        const fromNode = this.nodes.find(n => n.id === connection.from);
+        const toNode = this.nodes.find(n => n.id === connection.to);
+        if (!fromNode || !toNode) return;
+
+        const fromWidth = fromNode.width || 250;
+        const fromHeight = fromNode.height || 150;
+        const toWidth = toNode.width || 250;
+        const toHeight = toNode.height || 150;
+
+        const startX = fromNode.x + fromWidth;
+        const startY = fromNode.y + fromHeight / 2;
+        const endX = toNode.x;
+        const endY = toNode.y + toHeight / 2;
+
+        const midX = (startX + endX) / 2;
+        const midY = (startY + endY) / 2;
+
+        // Добавляем опорную точку
+        const pointId = `cp_${connectionId}_${this.controlPoints[connectionId].length}`;
+        this.controlPoints[connectionId].push({
+            id: pointId,
+            x: midX,
+            y: midY
+        });
+
+        this.render();
     }
     
     showNodeProperties(node) {
@@ -1840,14 +2133,17 @@ class FlowEditor {
     renderConnections() {
         let svg = `
             <defs>
-                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                    <polygon points="0 0, 10 3.5, 0 7" fill="#95a5a6"/>
+                <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse">
+                    <polygon points="0 0, 8 4, 0 8" fill="#95a5a6"/>
                 </marker>
-                <marker id="arrowhead-success" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                    <polygon points="0 0, 10 3.5, 0 7" fill="#38ef7d"/>
+                <marker id="arrowhead-success" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse">
+                    <polygon points="0 0, 8 4, 0 8" fill="#38ef7d"/>
                 </marker>
-                <marker id="arrowhead-error" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                    <polygon points="0 0, 10 3.5, 0 7" fill="#e74c3c"/>
+                <marker id="arrowhead-error" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse">
+                    <polygon points="0 0, 8 4, 0 8" fill="#e74c3c"/>
+                </marker>
+                <marker id="arrowhead-selected" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse">
+                    <polygon points="0 0, 8 4, 0 8" fill="#3498db"/>
                 </marker>
             </defs>
         `;
@@ -1860,8 +2156,14 @@ class FlowEditor {
 
                 let stroke = '#95a5a6';
                 let marker = 'url(#arrowhead)';
+                const isSelected = this.selectedConnection === conn.id;
+                
+                console.log('=== RENDER CONNECTION ===', 'conn.id:', conn.id, 'selectedConnection:', this.selectedConnection, 'isSelected:', isSelected);
 
-                if (conn.type === 'success') {
+                if (isSelected) {
+                    stroke = '#3498db';
+                    marker = 'url(#arrowhead-selected)';
+                } else if (conn.type === 'success') {
                     stroke = '#38ef7d';
                     marker = 'url(#arrowhead-success)';
                 } else if (conn.type === 'error') {
@@ -1876,27 +2178,36 @@ class FlowEditor {
                 }
 
                 let cssClass = 'connection-line';
-                if (conn.type === 'success') {
+                if (isSelected) {
+                    cssClass += ' selected';
+                } else if (conn.type === 'success') {
                     cssClass += ' success';
                 } else if (conn.type === 'error') {
                     cssClass += ' error';
                 }
 
                 // Add stroke-width variation for better visual distinction
-                let strokeWidth = 2;
-                if (conn.type === 'success') {
-                    strokeWidth = 3;
-                } else if (conn.type === 'error') {
-                    strokeWidth = 3;
+                let strokeWidth = isSelected ? 5 : 3;
+                if (conn.type === 'success' && !isSelected) {
+                    strokeWidth = 4;
+                } else if (conn.type === 'error' && !isSelected) {
+                    strokeWidth = 4;
                 }
 
-                svg += `<path class="${cssClass}" d="${path}" style="stroke: ${stroke}; stroke-width: ${strokeWidth}; marker-end: ${marker};" />`;
+                // НЕ добавляем полупрозрачность для цвета - позволяем CSS управлять этим
+                // Убираем inline stroke, чтобы CSS классы работали корректно
+                
+                svg += `<path class="${cssClass}" data-connection-id="${conn.id}" d="${path}" style="stroke-width: ${strokeWidth}; marker-end: ${marker}; cursor: pointer;" />`;
+
+                // Вычисляем координаты для лейбла, используя ту же логику, что и в calculateConnectionPath
+                const fromWidth = fromNode.width || 250;
+                const fromHeight = fromNode.height || 150;
+                const toWidth = toNode.width || 250;
+                const toHeight = toNode.height || 150;
 
                 let label = '';
-                let startX = fromNode.x + 250;
-                let startY = fromNode.y + 50;
-                const endX = toNode.x;
-                const endY = toNode.y + 50;
+                let startY = fromNode.y + fromHeight / 2;
+                let endY = toNode.y + toHeight / 2;
 
                 if (conn.buttonId && fromNode.buttons) {
                     const button = fromNode.buttons.find(b => b.id === conn.buttonId);
@@ -1908,26 +2219,78 @@ class FlowEditor {
                         label = button.text;
                     }
                 } else {
-                    startY = fromNode.y + 50;
                     if (conn.type === 'success') label = '✅ Success';
                     else if (conn.type === 'error') label = '❌ Error';
                     else if (conn.type === 'true') label = '✓ True';
                     else if (conn.type === 'false') label = '✗ False';
                 }
 
+                // Определяем точки начала и конца для лейбла
+                let startX, endX;
+                const fromRight = fromNode.x + fromWidth;
+                const toRight = toNode.x + toWidth;
+
+                if (fromRight < toNode.x) {
+                    startX = fromRight;
+                    endX = toNode.x;
+                } else if (toRight < fromNode.x) {
+                    startX = fromNode.x;
+                    endX = toRight;
+                } else {
+                    startX = fromRight;
+                    endX = toNode.x;
+                }
+
                 if (label) {
                     const midX = (startX + endX) / 2;
                     const midY = (startY + endY) / 2;
                     svg += `<text class="connection-label" x="${midX}" y="${midY}" text-anchor="middle">${this.escapeHtml(label)}</text>`;
+
+                    // Добавляем кнопку удаления на связи (всегда видимая)
+                    svg += `<g class="connection-delete-btn" data-connection-id="${conn.id}" style="cursor: pointer;">
+                        <circle cx="${midX + 50}" cy="${midY}" r="12" fill="#e74c3c" stroke="white" stroke-width="2"/>
+                        <text x="${midX + 50}" y="${midY + 4}" text-anchor="middle" fill="white" font-size="14" font-weight="bold">×</text>
+                    </g>`;
                 }
             }
         });
         
         if (this.tempConnection) {
-            svg += `<path class="connection-line" d="M ${this.tempConnection.startX} ${this.tempConnection.startY} L ${this.tempConnection.endX} ${this.tempConnection.endY}" style="stroke-dasharray: 5,5;" />`;
+            // Рисуем плавную кривую для временной связи
+            const midX = (this.tempConnection.startX + this.tempConnection.endX) / 2;
+            const path = `M ${this.tempConnection.startX} ${this.tempConnection.startY} C ${midX} ${this.tempConnection.startY}, ${midX} ${this.tempConnection.endY}, ${this.tempConnection.endX} ${this.tempConnection.endY}`;
+            svg += `<path class="connection-line temp-connection" d="${path}" style="stroke: #3498db; stroke-width: 4; stroke-dasharray: 8,4; fill: none;" />`;
         }
-        
+
+        // Рисуем опорные точки
+        Object.keys(this.controlPoints).forEach(connectionId => {
+            const points = this.controlPoints[connectionId];
+            points.forEach(cp => {
+                svg += `<circle class="control-point" data-connection-id="${connectionId}" data-point-id="${cp.id}" cx="${cp.x}" cy="${cp.y}" r="6" fill="#e67e22" stroke="white" stroke-width="2" style="cursor: move;" />`;
+            });
+        });
+
         this.connectionsSvg.innerHTML = svg;
+        
+        // Добавляем обработчики для кнопок удаления
+        this.connectionsSvg.querySelectorAll('.connection-delete-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const connectionId = btn.dataset.connectionId;
+                this.deleteConnection(connectionId);
+            });
+        });
+
+        // Добавляем обработчики для опорных точек
+        this.connectionsSvg.querySelectorAll('.control-point').forEach(point => {
+            point.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                const connectionId = point.dataset.connectionId;
+                const pointId = point.dataset.pointId;
+                this.draggedControlPoint = { connectionId, pointId };
+                this.draggedPointStart = { x: e.clientX, y: e.clientY };
+            });
+        });
     }
     
     calculateConnectionPath(conn) {
@@ -1936,24 +2299,59 @@ class FlowEditor {
 
         if (!fromNode || !toNode) return null;
 
-        let startY = fromNode.y + 50;
+        // Получаем размеры узлов
+        const fromWidth = fromNode.width || 250;
+        const fromHeight = fromNode.height || 150;
+        const toWidth = toNode.width || 250;
+        const toHeight = toNode.height || 150;
 
+        // Определяем начальную точку на первом узле
+        let startY = fromNode.y + fromHeight / 2;
         if (conn.buttonId && fromNode.buttons) {
             const btnIndex = fromNode.buttons.findIndex(b => b.id === conn.buttonId);
             if (btnIndex !== -1) {
                 startY = fromNode.y + 70 + (btnIndex * 35);
             }
-        } else if (!conn.buttonId) {
-            startY = fromNode.y + 50;
         }
 
-        const startX = fromNode.x + 250;
-        const endX = toNode.x;
-        const endY = toNode.y + 50;
+        // Определяем конечную точку на втором узле
+        const endY = toNode.y + toHeight / 2;
 
-        const midX = (startX + endX) / 2;
+        // Определяем, с какой стороны рисовать связь
+        let startX, endX;
 
-        return `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`;
+        // Проверяем относительное положение узлов
+        const fromRight = fromNode.x + fromWidth;
+        const toRight = toNode.x + toWidth;
+
+        if (fromRight < toNode.x) {
+            // Второй узел полностью справа - связь от правого края к левому
+            startX = fromRight;
+            endX = toNode.x;
+        } else if (toRight < fromNode.x) {
+            // Второй узел полностью слева - связь от левого края к правому
+            startX = fromNode.x;
+            endX = toRight;
+        } else {
+            // Узлы перекрываются по горизонтали - связь от правого края к левому
+            startX = fromRight;
+            endX = toNode.x;
+        }
+
+        // Проверяем, есть ли опорные точки для этой связи
+        const controlPoints = this.controlPoints[conn.id] || [];
+        if (controlPoints.length > 0) {
+            // Рисуем кривую через опорные точки
+            let path = `M ${startX} ${startY}`;
+            controlPoints.forEach(cp => {
+                path += ` L ${cp.x} ${cp.y}`;
+            });
+            path += ` L ${endX} ${endY}`;
+            return path;
+        }
+
+        // Простая прямая линия (без опорных точек)
+        return `M ${startX} ${startY} L ${endX} ${endY}`;
     }
     
     escapeHtml(text) {
@@ -2299,7 +2697,12 @@ function zoomReset() {
 
 let flowEditor;
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('=== DOM CONTENT LOADED ===');
     flowEditor = new FlowEditor();
+    console.log('=== FLOW EDITOR CREATED ===');
+    
+    // Делаем flowEditor доступным глобально для тестов
+    window.flowEditor = flowEditor;
 
     // Initialize tooltip functionality
     initializeTooltips();
@@ -2909,3 +3312,31 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+// Глобальная функция для удаления выделенной связи
+function deleteSelectedConnection() {
+    console.log('=== DELETE SELECTED CONNECTION ===');
+    if (window.flowEditor && window.flowEditor.selectedConnection) {
+        window.flowEditor.deleteConnection(window.flowEditor.selectedConnection);
+        // Скрываем контекстное меню после удаления
+        const menu = document.getElementById('connectionContextMenu');
+        if (menu) {
+            menu.style.display = 'none';
+            menu.style.visibility = 'hidden';
+        }
+    }
+}
+
+// Глобальная функция для добавления опорной точки
+function addControlPoint() {
+    console.log('=== ADD CONTROL POINT ===');
+    if (window.flowEditor && window.flowEditor.selectedConnection) {
+        window.flowEditor.addControlPointToConnection(window.flowEditor.selectedConnection);
+        // Скрываем контекстное меню после добавления
+        const menu = document.getElementById('connectionContextMenu');
+        if (menu) {
+            menu.style.display = 'none';
+            menu.style.visibility = 'hidden';
+        }
+    }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "max-bot-ui-tests",
+  "version": "1.0.0",
+  "description": "UI тесты для Max Bot Manager с Playwright",
+  "main": "playwright_test.js",
+  "scripts": {
+    "test": "node playwright_test.js",
+    "test:selenium": "python selenium_test.py"
+  },
+  "keywords": ["testing", "playwright", "selenium", "ui"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "playwright-core": "^1.40.0"
+  }
+}

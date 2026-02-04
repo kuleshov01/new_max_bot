@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "selenium": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@angiejones/mcp-selenium"
+      ],
+      "env": {
+        "CHROME_PATH": "/data/data/com.termux/files/usr/bin/chromium-browser",
+        "CHROMEDRIVER_PATH": "/data/data/com.termux/files/usr/bin/chromedriver",
+        "SELENIUM_HEADLESS": "true"
+      }
+    }
+  }
+}
