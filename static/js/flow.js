@@ -957,17 +957,96 @@ class FlowEditor {
                 }
             }
             
-            // Touching a node - select and prepare for dragging
-            console.log('Selecting node:', nodeId);
+            // В режиме connect обрабатываем клики на коннекторы
+            if (this.mode === 'connect') {
+                // Handle condition connector clicks
+                if (target?.closest('.condition-connector')) {
+                    const connectorEl = target.closest('.condition-connector');
+                    const connectionType = connectorEl.dataset.connectionType;
+                    
+                    this.draggedConnector = {
+                        type: 'condition',
+                        id: `${nodeId}_${connectionType}`,
+                        fromNode: nodeId,
+                        connectionType: connectionType
+                    };
+                    this.tempConnection = {
+                        startX: x,
+                        startY: y,
+                        endX: x,
+                        endY: y
+                    };
+                    e.stopPropagation();
+                    return;
+                }
+                // Handle API connector clicks
+                else if (target?.closest('.api-connector')) {
+                    const connectorEl = target.closest('.api-connector');
+                    const connectionType = connectorEl.dataset.connectionType;
+                    
+                    this.draggedConnector = {
+                        type: 'api',
+                        id: `${nodeId}_${connectionType}`,
+                        fromNode: nodeId,
+                        connectionType: connectionType
+                    };
+                    this.tempConnection = {
+                        startX: x,
+                        startY: y,
+                        endX: x,
+                        endY: y
+                    };
+                    e.stopPropagation();
+                    return;
+                }
+                // Handle regular button clicks
+                else if (target?.closest('.node-button') && target?.closest('.node-button').dataset.buttonConnectable === 'true') {
+                    const buttonEl = target.closest('.node-button');
+                    const buttonId = buttonEl.dataset.buttonId;
+                    
+                    this.draggedConnector = { type: 'button', id: buttonId, fromNode: nodeId };
+                    this.tempConnection = {
+                        startX: x,
+                        startY: y,
+                        endX: x,
+                        endY: y
+                    };
+                    e.stopPropagation();
+                    return;
+                }
+                // Handle node connector clicks
+                else if (nodeEl.dataset.nodeConnectable === 'true') {
+                    // Prevent node connections for API and condition nodes - they should only use specific connectors
+                    if (node && (node.type === 'api_request' || node.type === 'condition')) {
+                        // Don't allow general node connections for API and condition nodes
+                        return;
+                    }
+                    
+                    this.draggedConnector = { type: 'node', id: nodeId };
+                    this.tempConnection = {
+                        startX: x,
+                        startY: y,
+                        endX: x,
+                        endY: y
+                    };
+                    e.stopPropagation();
+                    return;
+                }
+            }
             
-            this.selectNode(nodeId);
-            
-            this.draggedNode = nodeId;
-            this.isDraggingCanvas = false;
-            this.dragOffset = {
-                x: x - this.nodes.find(n => n.id === nodeId).x,
-                y: y - this.nodes.find(n => n.id === nodeId).y
-            };
+            // Touching a node - select and prepare for dragging (only in edit mode)
+            if (this.mode !== 'connect') {
+                console.log('Selecting node:', nodeId);
+                
+                this.selectNode(nodeId);
+                
+                this.draggedNode = nodeId;
+                this.isDraggingCanvas = false;
+                this.dragOffset = {
+                    x: x - this.nodes.find(n => n.id === nodeId).x,
+                    y: y - this.nodes.find(n => n.id === nodeId).y
+                };
+            }
         } else {
             console.log('=== POINTER DOWN ON EMPTY SPACE ===', 'clearing selectedConnection:', this.selectedConnection);
             // Touching empty space - prepare for canvas panning
@@ -1056,6 +1135,11 @@ class FlowEditor {
                 
                 this.render();
             }
+        } else if (this.draggedConnector) {
+            // Drawing a connection
+            this.tempConnection.endX = x;
+            this.tempConnection.endY = y;
+            this.renderConnections();
         } else if (this.draggedNode) {
             // Dragging a node
             e.preventDefault();
@@ -1097,6 +1181,28 @@ class FlowEditor {
             this.resizingNode = null;
             this.resizeHandle = null;
             this.render();
+        }
+        
+        // Handle connector end (finishing a connection)
+        if (this.draggedConnector) {
+            const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('.node');
+            if (target) {
+                const toNodeId = target.dataset.id;
+                
+                if (this.draggedConnector.type === 'button') {
+                    this.addConnection(this.draggedConnector.id, toNodeId, this.draggedConnector.fromNode);
+                } else if (this.draggedConnector.type === 'node') {
+                    this.addNodeConnection(this.draggedConnector.id, toNodeId);
+                } else if (this.draggedConnector.type === 'api') {
+                    this.addApiConnection(this.draggedConnector.fromNode, toNodeId, this.draggedConnector.connectionType);
+                } else if (this.draggedConnector.type === 'condition') {
+                    this.addConditionConnection(this.draggedConnector.fromNode, toNodeId, this.draggedConnector.connectionType);
+                }
+            } else {
+                this.renderConnections();
+            }
+            this.draggedConnector = null;
+            this.tempConnection = null;
         }
         
         this.draggedNode = null;
