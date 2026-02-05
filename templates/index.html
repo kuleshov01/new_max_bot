@@ -84,6 +84,44 @@
                             <label class="form-label">Base URL</label>
                             <input type="text" class="form-control" id="editBotBaseUrl">
                         </div>
+                        
+                        <!-- Настройки ограничения текстовых сообщений -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-info text-white">
+                                <h6 class="mb-0">🚫 Ограничение текстовых сообщений</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="editTextRestrictionEnabled">
+                                        <label class="form-check-label" for="editTextRestrictionEnabled">
+                                            <strong>Только кнопки</strong> — запретить произвольный текст
+                                        </label>
+                                    </div>
+                                    <small class="form-text text-muted">
+                                        Когда включено, пользователи не смогут отправлять произвольные текстовые сообщения.
+                                        Им будет показано предупреждение с просьбой использовать кнопки.
+                                    </small>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Текст предупреждения</label>
+                                    <textarea class="form-control" id="editTextRestrictionWarning" rows="3"
+                                              placeholder="Текст, который увидит пользователь при попытке отправить текст"></textarea>
+                                    <small class="form-text text-muted">
+                                        Поддерживается HTML-разметка. Например: <code><b>Жирный</b></code>, <code><i>Курсив</i></code>
+                                    </small>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Разрешённые команды</label>
+                                    <input type="text" class="form-control" id="editAllowedCommands"
+                                           placeholder='["/start", "/help", "/settings"]'>
+                                    <small class="form-text text-muted">
+                                        JSON массив команд, которые не будут блокироваться. Пример: <code>["/start", "/help"]</code>
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                        
                         <div class="mb-3">
                             <label class="form-label">Стартовое сообщение</label>
                             <textarea class="form-control" id="editBotStartMessage" rows="4"></textarea>

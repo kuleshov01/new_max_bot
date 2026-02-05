@@ -112,7 +112,10 @@ def update_bot_by_id(bot_id):
         bot_id,
         name=data.get('name'),
         token=data.get('token'),
-        base_url=data.get('base_url')
+        base_url=data.get('base_url'),
+        text_restriction_enabled=data.get('text_restriction_enabled'),
+        text_restriction_warning=data.get('text_restriction_warning'),
+        allowed_commands=data.get('allowed_commands')
     )
 
     bot = get_bot(bot_id)
@@ -147,6 +150,19 @@ def restart_bot(bot_id):
     if success:
         return jsonify({'message': 'Bot restarted successfully'})
     return jsonify({'error': 'Failed to restart bot'}), 500
+
+@route('/api/bots/<int:bot_id>/reload-restriction', methods=['POST'])
+def reload_bot_restriction(bot_id):
+    """Перезагружает настройки ограничения текстовых сообщений без перезапуска бота."""
+    try:
+        if bot_id in bot_manager.bots:
+            bot_instance = bot_manager.bots[bot_id]
+            bot_instance.reload_restriction_settings()
+            return jsonify({'message': 'Restriction settings reloaded successfully'})
+        else:
+            return jsonify({'error': 'Bot is not running'}), 400
+    except Exception as e:
+        return jsonify({'error': f'Failed to reload restriction settings: {str(e)}'}), 500
 
 @route('/api/bots/<int:bot_id>/flow', methods=['GET'])
 def get_bot_flow(bot_id):
@@ -206,6 +222,10 @@ def startup():
     global started
     if not started:
         try:
+            # Выполняем миграцию базы данных
+            from database import migrate_add_text_restriction_fields
+            migrate_add_text_restriction_fields()
+            
             bots = get_all_bots()
             for bot in bots:
                 if bot['status'] == 'running':

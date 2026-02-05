@@ -1480,12 +1480,15 @@ class FlowEditor {
     }
     
     showNodeProperties(node) {
+        console.log('=== SHOW NODE PROPERTIES ===', 'node:', node ? node.id : 'null', 'type:', node ? node.type : 'null');
+        
         if (!node) {
             this.nodeProperties.innerHTML = '<p>Выберите узел для редактирования</p>';
             return;
         }
 
         let html = '';
+        console.log('=== SHOW NODE PROPERTIES ===', 'Generating HTML for node type:', node.type);
 
         if (node.type === 'api_request') {
             const headersData = this.parseHeaders(node.headers || '{}');
@@ -1644,8 +1647,10 @@ class FlowEditor {
         }
 
         this.nodeProperties.innerHTML = html;
-
+        console.log('=== SHOW NODE PROPERTIES ===', 'HTML set, length:', html.length, 'setupNodePropertyListeners calling...');
+        
         this.setupNodePropertyListeners(node);
+        console.log('=== SHOW NODE PROPERTIES ===', 'Completed');
     }
 
     setupNodePropertyListeners(node) {

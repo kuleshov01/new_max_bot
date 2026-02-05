@@ -39,6 +39,9 @@ def init_db():
             start_message TEXT,
             menu_config TEXT,
             status TEXT DEFAULT 'stopped',
+            text_restriction_enabled INTEGER DEFAULT 1,
+            text_restriction_warning TEXT DEFAULT 'Для управления ботом, пожалуйста, используйте кнопки ⬇️',
+            allowed_commands TEXT DEFAULT '["/start", "/help"]',
             created_at TEXT,
             updated_at TEXT
         )
@@ -95,22 +98,32 @@ def get_bot(bot_id):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
+    # Получаем данные с именами колонок для безопасности
+    cursor.execute('PRAGMA table_info(bots)')
+    columns = [col[1] for col in cursor.fetchall()]
+    
     cursor.execute('SELECT * FROM bots WHERE id = ?', (bot_id,))
     bot = cursor.fetchone()
     
     conn.close()
     
     if bot:
+        # Создаём словарь по именам колонок
+        bot_dict = dict(zip(columns, bot))
+        
         return {
-            'id': bot[0],
-            'name': bot[1],
-            'token': bot[2],
-            'base_url': bot[3],
-            'start_message': bot[4],
-            'menu_config': json.loads(bot[5]) if bot[5] else [],
-            'status': bot[6],
-            'created_at': bot[7],
-            'updated_at': bot[8]
+            'id': bot_dict.get('id'),
+            'name': bot_dict.get('name'),
+            'token': bot_dict.get('token'),
+            'base_url': bot_dict.get('base_url'),
+            'start_message': bot_dict.get('start_message'),
+            'menu_config': json.loads(bot_dict['menu_config']) if bot_dict.get('menu_config') else [],
+            'status': bot_dict.get('status'),
+            'text_restriction_enabled': bool(bot_dict.get('text_restriction_enabled')) if bot_dict.get('text_restriction_enabled') is not None else True,
+            'text_restriction_warning': bot_dict.get('text_restriction_warning') if bot_dict.get('text_restriction_warning') else 'Для управления ботом, пожалуйста, используйте кнопки ⬇️',
+            'allowed_commands': json.loads(bot_dict['allowed_commands']) if bot_dict.get('allowed_commands') else ['/start', '/help'],
+            'created_at': bot_dict.get('created_at'),
+            'updated_at': bot_dict.get('updated_at')
         }
     return None
 
@@ -122,27 +135,38 @@ def get_all_bots():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
+    # Получаем имена колонок для безопасного доступа
+    cursor.execute('PRAGMA table_info(bots)')
+    columns = [col[1] for col in cursor.fetchall()]
+    
     cursor.execute('SELECT * FROM bots')
     bots = cursor.fetchall()
     
     conn.close()
     
-    return [
-        {
-            'id': bot[0],
-            'name': bot[1],
-            'token': bot[2],
-            'base_url': bot[3],
-            'start_message': bot[4],
-            'menu_config': json.loads(bot[5]) if bot[5] else [],
-            'status': bot[6],
-            'created_at': bot[7],
-            'updated_at': bot[8]
-        }
-        for bot in bots
-    ]
+    result = []
+    for bot in bots:
+        # Создаём словарь по именам колонок
+        bot_dict = dict(zip(columns, bot))
+        
+        result.append({
+            'id': bot_dict.get('id'),
+            'name': bot_dict.get('name'),
+            'token': bot_dict.get('token'),
+            'base_url': bot_dict.get('base_url'),
+            'start_message': bot_dict.get('start_message'),
+            'menu_config': json.loads(bot_dict['menu_config']) if bot_dict.get('menu_config') else [],
+            'status': bot_dict.get('status'),
+            'text_restriction_enabled': bool(bot_dict.get('text_restriction_enabled')) if bot_dict.get('text_restriction_enabled') is not None else True,
+            'text_restriction_warning': bot_dict.get('text_restriction_warning') if bot_dict.get('text_restriction_warning') else 'Для управления ботом, пожалуйста, используйте кнопки ⬇️',
+            'allowed_commands': json.loads(bot_dict['allowed_commands']) if bot_dict.get('allowed_commands') else ['/start', '/help'],
+            'created_at': bot_dict.get('created_at'),
+            'updated_at': bot_dict.get('updated_at')
+        })
+    
+    return result
 
-def update_bot(bot_id, name=None, token=None, base_url=None):
+def update_bot(bot_id, name=None, token=None, base_url=None, text_restriction_enabled=None, text_restriction_warning=None, allowed_commands=None):
     """Обновляет информацию о боте. БД создаётся автоматически при первом вызове."""
     init_db()
     conn = sqlite3.connect(DB_FILE)
@@ -160,6 +184,15 @@ def update_bot(bot_id, name=None, token=None, base_url=None):
     if base_url:
         updates.append('base_url = ?')
         values.append(base_url)
+    if text_restriction_enabled is not None:
+        updates.append('text_restriction_enabled = ?')
+        values.append(1 if text_restriction_enabled else 0)
+    if text_restriction_warning is not None:
+        updates.append('text_restriction_warning = ?')
+        values.append(text_restriction_warning)
+    if allowed_commands is not None:
+        updates.append('allowed_commands = ?')
+        values.append(json.dumps(allowed_commands))
     
     updates.append('updated_at = ?')
     values.append(datetime.now().isoformat())
@@ -326,6 +359,50 @@ def clear_bot_logs(bot_id):
     
     conn.commit()
     conn.close()
+
+def migrate_add_text_restriction_fields():
+    """
+    Миграция для добавления полей ограничения текстовых сообщений в существующую БД.
+    Эта функция безопасна для многократного вызова.
+    """
+    if not os.path.exists(DB_FILE):
+        return
+    
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    try:
+        # Проверяем, существуют ли новые колонки
+        cursor.execute("PRAGMA table_info(bots)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        # Добавляем недостающие колонки
+        if 'text_restriction_enabled' not in columns:
+            cursor.execute('''
+                ALTER TABLE bots ADD COLUMN text_restriction_enabled INTEGER DEFAULT 1
+            ''')
+            print("Добавлено поле text_restriction_enabled")
+        
+        if 'text_restriction_warning' not in columns:
+            cursor.execute('''
+                ALTER TABLE bots ADD COLUMN text_restriction_warning TEXT DEFAULT 'Для управления ботом, пожалуйста, используйте кнопки ⬇️'
+            ''')
+            print("Добавлено поле text_restriction_warning")
+        
+        if 'allowed_commands' not in columns:
+            cursor.execute('''
+                ALTER TABLE bots ADD COLUMN allowed_commands TEXT DEFAULT '["/start", "/help"]'
+            ''')
+            print("Добавлено поле allowed_commands")
+        
+        conn.commit()
+        print("Миграция успешно выполнена")
+        
+    except sqlite3.OperationalError as e:
+        print(f"Ошибка миграции: {e}")
+    finally:
+        conn.close()
 
 # БД больше не инициализируется автоматически при импорте модуля
 # Инициализация происходит при первом вызове любой функции, работающей с БД

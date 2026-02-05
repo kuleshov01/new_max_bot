@@ -187,6 +187,11 @@ function openEditModal(botId) {
     document.getElementById('editBotStartMessage').value = bot.start_message || '';
     document.getElementById('editBotMenuConfig').value = JSON.stringify(bot.menu_config || [], null, 2);
     
+    // Настройки ограничения текстовых сообщений
+    document.getElementById('editTextRestrictionEnabled').checked = bot.text_restriction_enabled || false;
+    document.getElementById('editTextRestrictionWarning').value = bot.text_restriction_warning || 'Для управления ботом, пожалуйста, используйте кнопки ⬇️';
+    document.getElementById('editAllowedCommands').value = JSON.stringify(bot.allowed_commands || ['/start', '/help'], null, 2);
+    
     // Сбрасываем кнопку показа токена
     const toggleBtn = document.getElementById('toggleTokenBtn');
     toggleBtn.textContent = '👁️ Показать';
@@ -267,6 +272,11 @@ async function updateBot() {
     const start_message = document.getElementById('editBotStartMessage').value.trim();
     const menu_config_str = document.getElementById('editBotMenuConfig').value.trim();
     
+    // Настройки ограничения текстовых сообщений
+    const text_restriction_enabled = document.getElementById('editTextRestrictionEnabled').checked;
+    const text_restriction_warning = document.getElementById('editTextRestrictionWarning').value.trim();
+    const allowed_commands_str = document.getElementById('editAllowedCommands').value.trim();
+    
     if (!name || !token) {
         alert('Пожалуйста, заполните название и токен');
         return;
@@ -287,6 +297,16 @@ async function updateBot() {
         }
     }
     
+    let allowed_commands = ['/start', '/help'];
+    if (allowed_commands_str) {
+        try {
+            allowed_commands = JSON.parse(allowed_commands_str);
+        } catch (e) {
+            alert('Ошибка в формате JSON для разрешённых команд');
+            return;
+        }
+    }
+    
     try {
         const response = await fetch(apiUrl(`api/bots/${botId}`), {
             method: 'PUT',
@@ -298,7 +318,10 @@ async function updateBot() {
                 token,
                 base_url,
                 start_message,
-                menu_config
+                menu_config,
+                text_restriction_enabled,
+                text_restriction_warning,
+                allowed_commands
             })
         });
         

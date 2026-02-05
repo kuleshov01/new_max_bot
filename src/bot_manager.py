@@ -4,6 +4,7 @@ import logging
 import requests
 import sys
 from database import get_bot, update_bot_status, get_bot_flow, add_bot_log
+from text_message_restrictions import TextMessageRestriction
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -36,7 +37,26 @@ class BotInstance:
         self.bot_name = self.bot_config.get('name', f'Bot_{bot_id}')
         self.bot_token = self.bot_config.get('token', '')
 
+        # Инициализация ограничителя текстовых сообщений
+        # Текст предупреждения можно настроить через bot_config или использовать значение по умолчанию
+        warning_text = self.bot_config.get(
+            'text_restriction_warning',
+            "Для управления ботом, пожалуйста, используйте кнопки ⬇️"
+        )
+        allowed_commands = self.bot_config.get(
+            'allowed_commands',
+            ['/start', '/help']
+        )
+        text_restriction_enabled = self.bot_config.get('text_restriction_enabled', True)
+        
+        self.text_restriction = TextMessageRestriction(
+            warning_message=warning_text,
+            allowed_commands=allowed_commands,
+            enabled=text_restriction_enabled
+        )
+
         self.log('INFO', f'Инициализация бота ID: {self.bot_id}, имя: "{self.bot_name}"')
+        self.log('INFO', f'Ограничение текстовых сообщений: {"включено" if text_restriction_enabled else "выключено"}')
 
     def log(self, level, message):
         import sys
@@ -56,18 +76,22 @@ class BotInstance:
             if marker:
                 params["marker"] = marker
             headers = {"Authorization": self.bot_token}
-            # Уменьшаем таймаут до 30 секунд для более быстрого отклика (как в main.py)
+            # Увеличиваем таймаут до 90 секунд для long polling
             self.log('DEBUG', f'Запрос обновлений с параметрами: marker={marker}')
-            response = requests.get(url, params=params, headers=headers, timeout=30)
+            response = requests.get(url, params=params, headers=headers, timeout=90)
             response.raise_for_status()
             result = response.json()
             updates_count = len(result.get('updates', []))
             if updates_count > 0:
                 self.log('DEBUG', f'Получено {updates_count} обновлений')
             return result
+        except requests.exceptions.Timeout as e:
+            # При таймауте сохраняем текущий marker, чтобы не потерять позицию
+            self.log('WARNING', f'Таймаут при получении обновлений (marker={marker}): {e}')
+            return {"updates": [], "marker": marker}
         except Exception as e:
             self.log('ERROR', f'Ошибка при получении обновлений: {e}')
-            return {"updates": [], "marker": None}
+            return {"updates": [], "marker": marker}
 
     def send_message(self, chat_id, text, attachments=None, format_type="html"):
         try:
@@ -219,6 +243,13 @@ class BotInstance:
                     self.user_states[chat_id]['user_text'] = text
                     self.process_node_after_input(chat_id)
                     return
+            
+            # Проверка ограничителя текстовых сообщений
+            # Если текст не является командой и не ожидается ввод, проверяем ограничение
+            if text and self.text_restriction.should_restrict(text):
+                self.log('INFO', f'Текстовое сообщение от чата {chat_id} ограничено: "{text[:30]}..."')
+                self.text_restriction.send_warning(self, chat_id)
+                return
             
             # Если это просто текстовое сообщение без ожидания, логируем
             if text:
@@ -416,7 +447,7 @@ class BotInstance:
                     return
 
         # Переход к следующей ноде по соединению
-        connection = next((c for c in self.flow_data.get('connections', []) if c['buttonId'] == button_id), None)
+        connection = next((c for c in self.flow_data.get('connections', []) if c.get('buttonId') == button_id), None)
         if connection and connection.get('to'):
             history.append(current_node_id)
             self.user_states[chat_id]['history'] = history
@@ -446,8 +477,8 @@ class BotInstance:
         if current_node.get('buttons'):
             # Ищем соединение по кнопке (для request_contact, request_location и т.д.)
             for btn in current_node['buttons']:
-                connection = next((c for c in self.flow_data.get('connections', []) 
-                                  if c['buttonId'] == btn['id']), None)
+                connection = next((c for c in self.flow_data.get('connections', [])
+                                  if c.get('buttonId') == btn['id']), None)
                 if connection and connection.get('to'):
                     history = current_state.get('history', [])
                     history.append(current_node_id)
@@ -459,8 +490,8 @@ class BotInstance:
                     return
         
         # Иначе ищем обычное соединение от ноды
-        connection = next((c for c in self.flow_data.get('connections', []) 
-                          if c['from'] == current_node_id and not c.get('buttonId')), None)
+        connection = next((c for c in self.flow_data.get('connections', [])
+                          if c.get('from') == current_node_id and not c.get('buttonId')), None)
         
         if connection and connection.get('to'):
             history = current_state.get('history', [])
@@ -517,6 +548,63 @@ class BotInstance:
             return str(value)
         
         return re.sub(pattern, replace_var, text)
+    
+    # ==========================================================================
+    # Методы для управления ограничением текстовых сообщений
+    # ==========================================================================
+    
+    def enable_text_restriction(self):
+        """Включает ограничение текстовых сообщений."""
+        self.text_restriction.enable()
+        self.log('INFO', 'Ограничение текстовых сообщений включено')
+    
+    def disable_text_restriction(self):
+        """Выключает ограничение текстовых сообщений."""
+        self.text_restriction.disable()
+        self.log('INFO', 'Ограничение текстовых сообщений выключено')
+    
+    def is_text_restriction_enabled(self) -> bool:
+        """Проверяет, включено ли ограничение текстовых сообщений."""
+        return self.text_restriction.is_enabled()
+    
+    def update_restriction_warning(self, new_message: str):
+        """
+        Обновляет текст предупреждения для ограничителя.
+        
+        Args:
+            new_message: Новый текст предупреждения
+        """
+        self.text_restriction.update_warning_message(new_message)
+        self.log('INFO', f'Текст предупреждения обновлён: "{new_message[:30]}..."')
+    
+    def add_allowed_command(self, command: str):
+        """
+        Добавляет команду в список разрешённых.
+        
+        Args:
+            command: Команда для добавления (например, '/settings')
+        """
+        self.text_restriction.add_allowed_command(command)
+        self.log('INFO', f'Добавлена разрешённая команда: {command}')
+    
+    def remove_allowed_command(self, command: str):
+        """
+        Удаляет команду из списка разрешённых.
+        
+        Args:
+            command: Команда для удаления
+        """
+        self.text_restriction.remove_allowed_command(command)
+        self.log('INFO', f'Удалена разрешённая команда: {command}')
+    
+    def get_allowed_commands(self) -> list:
+        """
+        Возвращает список разрешённых команд.
+        
+        Returns:
+            list: Список разрешённых команд
+        """
+        return self.text_restriction.allowed_commands.copy()
 
     def process_update(self, update, marker):
         update_type = update.get("update_type") or update.get("type")
@@ -600,7 +688,11 @@ class BotInstance:
                     if updates_count > 0:
                         self.log('DEBUG', f'Получено {updates_count} обновлений')
                     for update in updates["updates"]:
-                        marker = self.process_update(update, marker)
+                        try:
+                            marker = self.process_update(update, marker)
+                        except Exception as e:
+                            self.log('ERROR', f'Ошибка обработки обновления: {e}')
+                            # Продолжаем с текущим marker, чтобы не застрять в цикле
                 if "marker" in updates:
                     marker = updates["marker"]
 
@@ -630,6 +722,29 @@ class BotInstance:
             update_bot_status(self.bot_id, "stopped")
         except Exception as e:
             self.log('ERROR', f'Ошибка при обновлении статуса при остановке: {e}')
+    
+    def reload_restriction_settings(self):
+        """
+        Перезагружает настройки ограничения текстовых сообщений из базы данных.
+        Полезно для применения изменений без перезапуска бота.
+        """
+        try:
+            bot_config = get_bot(self.bot_id)
+            if bot_config:
+                warning_text = bot_config.get(
+                    'text_restriction_warning',
+                    'Для управления ботом, пожалуйста, используйте кнопки ⬇️'
+                )
+                allowed_commands = bot_config.get('allowed_commands', ['/start', '/help'])
+                text_restriction_enabled = bot_config.get('text_restriction_enabled', True)
+                
+                self.text_restriction.warning_message = warning_text
+                self.text_restriction.allowed_commands = allowed_commands
+                self.text_restriction.enabled = text_restriction_enabled
+                
+                self.log('INFO', f'Настройки ограничения перезагружены: {"включено" if text_restriction_enabled else "выключено"}')
+        except Exception as e:
+            self.log('ERROR', f'Ошибка при перезагрузке настроек ограничения: {e}')
 
 class BotManager:
     def __init__(self):
