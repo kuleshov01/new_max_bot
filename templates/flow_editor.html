@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Редактор диалоговых потоков</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/flow.css') }}?v=9">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/flow.css') }}?v=13">
 </head>
 <body>
     <div id="app">
@@ -16,6 +16,14 @@
                 <select id="botSelect">
                     <option value="new">+ Создать нового бота...</option>
                 </select>
+            </div>
+            
+            <div class="sidebar-section">
+                <h4>Пользовательские команды</h4>
+                <div id="commandsList">
+                    <p class="text-muted">Загрузка команд...</p>
+                </div>
+                <button class="btn btn-add" onclick="window.showCreateCommandModal()">+ Новая команда</button>
             </div>
             
             <div class="sidebar-section">
@@ -130,10 +138,41 @@
         <div class="context-menu-item" onclick="addControlPoint()">➕ Добавить опорную точку</div>
     </div>
 
+    <!-- Модальное окно для создания/редактирования команды -->
+    <div id="commandModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="commandModalTitle">📝 Новая команда</h3>
+                <button class="modal-close" onclick="closeCommandModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="property-group">
+                    <label>Название команды:</label>
+                    <input type="text" id="commandName" placeholder="/help" maxlength="50">
+                    <small class="text-muted">Начинается с / (например, /help, /info)</small>
+                </div>
+                <div class="property-group">
+                    <label>Описание:</label>
+                    <textarea id="commandDescription" rows="3" placeholder="Описание команды..."></textarea>
+                </div>
+                <div class="property-group">
+                    <label>
+                        <input type="checkbox" id="commandEnabled" checked>
+                        Включена
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-action" onclick="saveCommandModal()">✅ Сохранить</button>
+                <button class="btn btn-mode" onclick="closeCommandModal()">❌ Отмена</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Set the base URL for API calls
         window.API_BASE_URL = '{{ base_url }}';
     </script>
-    <script src="{{ url_for('static', filename='js/flow.js') }}?v=11"></script>
+    <script src="{{ url_for('static', filename='js/flow.js') }}?v=24"></script>
 </body>
 </html>

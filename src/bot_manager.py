@@ -3,7 +3,7 @@ import time
 import logging
 import requests
 import sys
-from database import get_bot, update_bot_status, get_bot_flow, add_bot_log
+from database import get_bot, update_bot_status, get_bot_flow, add_bot_log, get_custom_command, get_custom_commands
 from text_message_restrictions import TextMessageRestriction
 
 logger = logging.getLogger()
@@ -23,12 +23,16 @@ class BotInstance:
         self.bot_id = bot_id
         self.bot_config = get_bot(bot_id)
         self.flow_data = get_bot_flow(bot_id)
+        self.custom_commands = {}  # Хранение пользовательских команд {command: flow_data}
         
         # Проверка на случай отсутствия БД
         if not self.bot_config:
             raise ValueError(f"Bot configuration not found for ID: {bot_id}")
         if not self.flow_data:
             raise ValueError(f"Bot flow not found for ID: {bot_id}")
+        
+        # Загружаем пользовательские команды
+        self.load_custom_commands()
         
         self.user_states = {}
         self.running = False
@@ -57,6 +61,67 @@ class BotInstance:
 
         self.log('INFO', f'Инициализация бота ID: {self.bot_id}, имя: "{self.bot_name}"')
         self.log('INFO', f'Ограничение текстовых сообщений: {"включено" if text_restriction_enabled else "выключено"}')
+        self.log('INFO', f'Загружено {len(self.custom_commands)} пользовательских команд')
+
+    def load_custom_commands(self):
+        """Загружает пользовательские команды из базы данных."""
+        try:
+            commands = get_custom_commands(self.bot_id)
+            self.custom_commands = {}
+            for cmd in commands:
+                if cmd['enabled']:
+                    self.custom_commands[cmd['command']] = cmd['flow_data']
+                    self.log('DEBUG', f'Загружена команда: {cmd["command"]}')
+        except Exception as e:
+            self.log('ERROR', f'Ошибка загрузки пользовательских команд: {e}')
+            self.custom_commands = {}
+
+    def reload_custom_commands(self):
+        """Перезагружает пользовательские команды из базы данных."""
+        self.load_custom_commands()
+        self.log('INFO', f'Перезагружено {len(self.custom_commands)} пользовательских команд')
+
+    def is_custom_command(self, text):
+        """Проверяет, является ли текст пользовательской командой."""
+        if not text or not text.startswith('/'):
+            return False
+        return text in self.custom_commands
+
+    def execute_custom_command_flow(self, chat_id, command, flow_data):
+        """Выполняет flow пользовательской команды."""
+        try:
+            if not flow_data or not flow_data.get('nodes'):
+                self.log('WARNING', f'Flow для команды {command} пуст или некорректен')
+                return
+            
+            # Находим стартовую ноду в flow команды (первая нода)
+            nodes = flow_data.get('nodes', [])
+            if not nodes:
+                self.log('WARNING', f'Нет нод в flow для команды {command}')
+                return
+            
+            # Используем первую ноду как стартовую
+            start_node = nodes[0]
+            
+            # Сохраняем текущий flow бота и заменяем на flow команды
+            original_flow = self.flow_data
+            self.flow_data = flow_data
+            
+            # Сбрасываем состояние пользователя для команды
+            if chat_id not in self.user_states:
+                self.user_states[chat_id] = {}
+            self.user_states[chat_id]['command_mode'] = command
+            self.user_states[chat_id]['original_flow'] = original_flow
+            
+            # Показываем первую ноду
+            self.show_node(chat_id, start_node['id'])
+            
+            self.log('INFO', f'Выполнена команда {command} для чата {chat_id}')
+        except Exception as e:
+            self.log('ERROR', f'Ошибка выполнения команды {command}: {e}')
+            # Восстанавливаем оригинальный flow
+            if chat_id in self.user_states and 'original_flow' in self.user_states[chat_id]:
+                self.flow_data = self.user_states[chat_id]['original_flow']
 
     def log(self, level, message):
         import sys
@@ -230,6 +295,13 @@ class BotInstance:
                 self.log('INFO', f'Команда /start от чата {chat_id}')
                 self.user_states[chat_id] = {'current_node': None, 'history': []}
                 self.show_node(chat_id, 'start')
+                return
+            
+            # Обработка пользовательских команд
+            if self.is_custom_command(text):
+                self.log('INFO', f'Пользовательская команда {text} от чата {chat_id}')
+                command_flow = self.custom_commands[text]
+                self.execute_custom_command_flow(chat_id, text, command_flow)
                 return
 
             # Проверяем, ожидается ли текстовый ввод от пользователя

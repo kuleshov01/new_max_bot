@@ -15,6 +15,8 @@ class FlowEditor {
         this.mode = 'edit';
         this.DEBUG_ENABLED = true;
         this.selectedConnection = null;
+        this.currentCommandId = null; // ID текущей редактируемой команды
+        this.isEditingCommand = false; // Режим редактирования команды
         this.controlPoints = {}; // Опорные точки для изгиба линий
         this.draggedControlPoint = null;
         this.draggedPointStart = null;
@@ -44,11 +46,14 @@ class FlowEditor {
     }
     
     init() {
+        console.log('=== INIT START ===');
         this.canvas = document.getElementById('flowCanvas');
         this.nodesContainer = document.getElementById('nodes');
         this.connectionsSvg = document.getElementById('connections');
         this.nodeProperties = document.getElementById('nodeProperties');
         this.botSelect = document.getElementById('botSelect');
+        
+        console.log('=== INIT ===', 'canvas:', !!this.canvas, 'nodesContainer:', !!this.nodesContainer, 'botSelect:', !!this.botSelect);
 
         this.setupEventListeners();
         this.loadBotFromUrl();
@@ -57,8 +62,10 @@ class FlowEditor {
         if (!this.currentBotId) {
             this.createStartNode();
         }
+        this.loadCommands(); // Загружаем команды при инициализации
         this.updateZoomLevel();
         this.render();
+        console.log('=== INIT END ===');
     }
 
     
@@ -72,9 +79,27 @@ class FlowEditor {
     }
     
     async loadBots() {
+        console.log('=== LOAD BOTS START ===');
+        console.log('=== LOAD BOTS ===', 'API_BASE_URL:', window.API_BASE_URL);
+        console.log('=== LOAD BOTS ===', 'apiUrl:', this.apiUrl('api/bots'));
+        console.log('=== LOAD BOTS ===', 'botSelect:', this.botSelect);
+        
         try {
             const response = await fetch(this.apiUrl('api/bots'));
+            console.log('=== LOAD BOTS ===', 'response status:', response.status);
+            
+            if (!response.ok) {
+                console.error('=== LOAD BOTS ERROR ===', 'response not ok:', response.status);
+                return;
+            }
+            
             const bots = await response.json();
+            console.log('=== LOAD BOTS ===', 'bots:', bots);
+
+            if (!this.botSelect) {
+                console.error('=== LOAD BOTS ERROR ===', 'botSelect is null!');
+                return;
+            }
 
             this.botSelect.innerHTML = '<option value="new">+ Создать нового бота...</option>';
             bots.forEach(bot => {
@@ -83,11 +108,13 @@ class FlowEditor {
                 option.textContent = bot.name;
                 if (bot.id === this.currentBotId) {
                     option.selected = true;
+                    console.log('=== LOAD BOTS ===', 'selected bot:', bot.id, bot.name);
                 }
                 this.botSelect.appendChild(option);
             });
+            console.log('=== LOAD BOTS END ===', 'total bots:', bots.length);
         } catch (error) {
-            console.error('Error loading bots:', error);
+            console.error('=== LOAD BOTS ERROR ===', error);
         }
     }
     
@@ -102,6 +129,13 @@ class FlowEditor {
                 this.maxNodeId();
                 this.render();
             }
+            
+            // Сбрасываем режим редактирования команды
+            this.currentCommandId = null;
+            this.isEditingCommand = false;
+            
+            // Загружаем команды бота
+            this.loadCommands();
         } catch (error) {
             console.error('Error loading bot flow:', error);
         }
@@ -574,6 +608,8 @@ class FlowEditor {
         if (e.target.closest('.node')) {
             const nodeEl = e.target.closest('.node');
             const nodeId = nodeEl.dataset.id;
+            
+            console.log('=== MOUSE DOWN ON NODE ===', 'nodeId:', nodeId, 'dataset.id:', nodeEl.dataset.id);
 
             if (e.target.classList.contains('delete-btn')) {
                 this.deleteNode(nodeId);
@@ -581,6 +617,7 @@ class FlowEditor {
                 return;
             }
 
+            console.log('=== CALLING SELECT NODE ===', 'nodeId:', nodeId);
             this.selectNode(nodeId);
             this.draggedNode = nodeId;
             this.dragOffset = {
@@ -1036,7 +1073,7 @@ class FlowEditor {
             
             // Touching a node - select and prepare for dragging (only in edit mode)
             if (this.mode !== 'connect') {
-                console.log('Selecting node:', nodeId);
+                console.log('=== POINTER DOWN SELECTING NODE ===', 'nodeId:', nodeId, 'mode:', this.mode);
                 
                 this.selectNode(nodeId);
                 
@@ -1395,7 +1432,8 @@ class FlowEditor {
         if (botId === 'new') {
             this.createNewBot();
         } else if (botId) {
-            this.loadBotFlow(botId);
+            this.currentBotId = parseInt(botId);
+            this.loadBotFlow(this.currentBotId);
         }
     }
 
@@ -1413,15 +1451,33 @@ class FlowEditor {
         this.render();
     }
     selectNode(nodeId) {
-        console.log('=== SELECT NODE ===', 'nodeId:', nodeId, 'was clearing selectedConnection:', this.selectedConnection);
+        console.log('=== SELECT NODE START ===', 'nodeId:', nodeId, 'selectedConnection was:', this.selectedConnection);
+        console.log('=== SELECT NODE ===', 'nodeProperties exists:', !!this.nodeProperties);
+        
         this.selectedNode = nodeId;
         this.selectedConnection = null; // Снимаем выделение со связи при выборе узла
         const node = this.nodes.find(n => n.id === nodeId);
-        console.log('Node found:', node ? node.id : 'null', 'selectedNode set to:', this.selectedNode, 'selectedConnection cleared');
+        
+        console.log('Node found:', node ? node.id : 'null', 'type:', node ? node.type : 'null');
+        console.log('About to call showNodeProperties...');
+        
         this.showNodeProperties(node);
         this.updateDeleteConnectionButton();
-        this.render();
-        console.log('=== NODE SELECTED ===', 'selectedNode:', this.selectedNode, 'selectedConnection:', this.selectedConnection);
+        this.updateNodeSelection(); // Обновляем только выделение узлов
+        
+        console.log('=== NODE SELECTED END ===', 'selectedNode:', this.selectedNode, 'selectedConnection:', this.selectedConnection);
+    }
+    
+    updateNodeSelection() {
+        // Обновляет только визуальное выделение узлов без полной перерисовки
+        const allNodes = document.querySelectorAll('.node');
+        allNodes.forEach(nodeEl => {
+            if (nodeEl.dataset.id === this.selectedNode) {
+                nodeEl.classList.add('selected');
+            } else {
+                nodeEl.classList.remove('selected');
+            }
+        });
     }
     
     selectConnection(connectionId) {
@@ -1481,6 +1537,12 @@ class FlowEditor {
     
     showNodeProperties(node) {
         console.log('=== SHOW NODE PROPERTIES ===', 'node:', node ? node.id : 'null', 'type:', node ? node.type : 'null');
+        console.log('=== SHOW NODE PROPERTIES ===', 'nodeProperties element:', !!this.nodeProperties);
+        
+        if (!this.nodeProperties) {
+            console.error('=== NODE PROPERTIES ELEMENT NOT FOUND ===');
+            return;
+        }
         
         if (!node) {
             this.nodeProperties.innerHTML = '<p>Выберите узел для редактирования</p>';
@@ -1648,6 +1710,8 @@ class FlowEditor {
 
         this.nodeProperties.innerHTML = html;
         console.log('=== SHOW NODE PROPERTIES ===', 'HTML set, length:', html.length, 'setupNodePropertyListeners calling...');
+        console.log('=== SHOW NODE PROPERTIES ===', 'innerHTML after set:', this.nodeProperties.innerHTML.substring(0, 100) + '...');
+        console.log('=== SHOW NODE PROPERTIES ===', 'element visible:', window.getComputedStyle(this.nodeProperties).display !== 'none');
         
         this.setupNodePropertyListeners(node);
         console.log('=== SHOW NODE PROPERTIES ===', 'Completed');
@@ -2695,21 +2759,42 @@ class FlowEditor {
         };
 
         try {
-            const response = await fetch(this.apiUrl(`api/bots/${this.currentBotId}/flow`), {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(flowData)
-            });
-            if (response.ok) {
-                alert('Диалог сохранен успешно!');
+            let response;
+            
+            if (this.isEditingCommand && this.currentCommandId) {
+                // Сохраняем flow команды
+                response = await fetch(this.apiUrl(`api/bots/${this.currentBotId}/commands/${this.currentCommandId}/flow`), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(flowData)
+                });
+                
+                if (response.ok) {
+                    alert('Flow команды сохранён успешно!');
+                } else {
+                    alert('Ошибка при сохранении flow команды');
+                }
             } else {
-                alert('Ошибка при сохранении диалога');
+                // Сохраняем flow бота
+                response = await fetch(this.apiUrl(`api/bots/${this.currentBotId}/flow`), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(flowData)
+                });
+                
+                if (response.ok) {
+                    alert('Диалог сохранён успешно!');
+                } else {
+                    alert('Ошибка при сохранении диалога');
+                }
             }
         } catch (error) {
             console.error('Error saving flow:', error);
-            alert('Ошибка при сохранении диалога: ' + error.message);
+            alert('Ошибка при сохранении: ' + error.message);
         }
     }
     
@@ -2750,6 +2835,337 @@ class FlowEditor {
         };
         input.click();
     }
+    
+    // ==========================================================================
+    // Методы для работы с пользовательскими командами
+    // ==========================================================================
+    
+    async loadCommands() {
+        // Загружает список пользовательских команд для текущего бота
+        if (!this.currentBotId) {
+            this.renderCommandsList([]);
+            return;
+        }
+        
+        try {
+            const response = await fetch(this.apiUrl(`api/bots/${this.currentBotId}/commands`));
+            const commands = await response.json();
+            
+            // Добавляем системную команду /start в начало списка
+            const startCommand = {
+                id: 'start',
+                command: '/start',
+                description: 'Основной сценарий бота',
+                enabled: true,
+                isSystem: true // Флаг для системной команды
+            };
+            
+            this.renderCommandsList([startCommand, ...commands]);
+        } catch (error) {
+            console.error('Error loading commands:', error);
+            this.renderCommandsList([]);
+        }
+    }
+    
+    renderCommandsList(commands) {
+        // Отображает список пользовательских команд.
+        const list = document.getElementById('commandsList');
+        if (!list) return;
+        
+        if (commands.length === 0) {
+            list.innerHTML = '<p class="text-muted">Нет команд. Создайте первую команду!</p>';
+            return;
+        }
+        
+        list.innerHTML = commands.map(cmd => {
+            const isSystem = cmd.isSystem || false;
+            // Активная команда: либо текущая выбранная, либо /start если ничего не выбрано
+            const isActive = this.currentCommandId === cmd.id || (!this.currentCommandId && cmd.id === 'start');
+            
+            return `
+            <div class="command-item ${isActive ? 'active' : ''} ${isSystem ? 'system-command' : ''}" data-command-id="${cmd.id}" onclick="window.flowEditor.editCommandFlow('${cmd.id}')">
+                <div class="command-header">
+                    <strong>${this.escapeHtml(cmd.command)}</strong>
+                    ${!isSystem ? `
+                        <span class="command-status ${cmd.enabled ? 'enabled' : 'disabled'}">
+                            ${cmd.enabled ? '✓' : '✗'}
+                        </span>
+                    ` : '<span class="system-badge">Система</span>'}
+                </div>
+                <div class="command-description">${this.escapeHtml(cmd.description || 'Без описания')}</div>
+                <div class="command-actions">
+                    ${!isSystem ? `
+                        <button class="btn btn-small" onclick="event.stopPropagation(); window.flowEditor.editCommand(${cmd.id})" title="Редактировать команду">✏️</button>
+                        <button class="btn btn-small btn-danger" onclick="event.stopPropagation(); window.flowEditor.deleteCommand(${cmd.id})" title="Удалить">🗑️</button>
+                    ` : ''}
+                </div>
+            </div>
+        `}).join('');
+    }
+    
+    async createCommand(command, description, enabled) {
+        // Создаёт новую пользовательскую команду.
+        if (!this.currentBotId) {
+            alert('Сначала выберите бота');
+            return;
+        }
+        
+        try {
+            const response = await fetch(this.apiUrl(`api/bots/${this.currentBotId}/commands`), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    command: command,
+                    description: description,
+                    flow_data: {
+                        nodes: [
+                            {
+                                id: 'start',
+                                type: 'menu',
+                                x: 100,
+                                y: 100,
+                                text: `👋 Команда ${command}`,
+                                buttons: [
+                                    { id: 'start_1', text: 'Начать' }
+                                ],
+                                isStart: true,
+                                format: 'markdown'
+                            }
+                        ],
+                        connections: []
+                    },
+                    enabled: enabled
+                })
+            });
+            
+            if (response.ok) {
+                const cmd = await response.json();
+                await this.loadCommands();
+                return cmd;
+            } else {
+                const error = await response.json();
+                alert('Ошибка при создании команды: ' + (error.error || 'Неизвестная ошибка'));
+            }
+        } catch (error) {
+            console.error('Error creating command:', error);
+            alert('Ошибка при создании команды: ' + error.message);
+        }
+    }
+    
+    async updateCommand(commandId, command, description, enabled) {
+        // Обновляет пользовательскую команду.
+        try {
+            const response = await fetch(this.apiUrl(`api/bots/${this.currentBotId}/commands/${commandId}`), {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    command: command,
+                    description: description,
+                    enabled: enabled
+                })
+            });
+            
+            if (response.ok) {
+                await this.loadCommands();
+                return true;
+            } else {
+                const error = await response.json();
+                alert('Ошибка при обновлении команды: ' + (error.error || 'Неизвестная ошибка'));
+            }
+        } catch (error) {
+            console.error('Error updating command:', error);
+            alert('Ошибка при обновлении команды: ' + error.message);
+        }
+        return false;
+    }
+    
+    async deleteCommand(commandId) {
+        // Удаляет пользовательскую команду.
+        if (!confirm('Удалить эту команду?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(this.apiUrl(`api/bots/${this.currentBotId}/commands/${commandId}`), {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                // Если удаляем текущую команду, выходим из режима редактирования
+                if (this.currentCommandId === commandId) {
+                    this.currentCommandId = null;
+                    this.isEditingCommand = false;
+                    this.loadBotFlow(this.currentBotId);
+                }
+                await this.loadCommands();
+            } else {
+                alert('Ошибка при удалении команды');
+            }
+        } catch (error) {
+            console.error('Error deleting command:', error);
+            alert('Ошибка при удалении команды: ' + error.message);
+        }
+    }
+    
+    async editCommand(commandId) {
+        // Открывает модальное окно для редактирования команды.
+        try {
+            const response = await fetch(this.apiUrl(`api/bots/${this.currentBotId}/commands/${commandId}`));
+            if (response.ok) {
+                const cmd = await response.json();
+                this.showCommandModal(cmd);
+            } else {
+                alert('Ошибка при загрузке команды');
+            }
+        } catch (error) {
+            console.error('Error loading command:', error);
+            alert('Ошибка при загрузке команды: ' + error.message);
+        }
+    }
+    
+    async editCommandFlow(commandId) {
+        // Загружает flow команды для редактирования.
+        
+        // Если это системная команда /start, загружаем основной flow бота
+        if (commandId === 'start') {
+            this.currentCommandId = null;
+            this.isEditingCommand = false;
+            this.loadBotFlow(this.currentBotId);
+            return;
+        }
+        
+        try {
+            const response = await fetch(this.apiUrl(`api/bots/${this.currentBotId}/commands/${commandId}/flow`));
+            if (response.ok) {
+                const flowData = await response.json();
+                this.currentCommandId = commandId;
+                this.isEditingCommand = true;
+                this.nodes = flowData.nodes || [];
+                this.connections = flowData.connections || [];
+                this.maxNodeId();
+                this.render();
+                this.loadCommands(); // Обновляем список для подсветки активной команды
+            } else {
+                alert('Ошибка при загрузке flow команды');
+            }
+        } catch (error) {
+            console.error('Error loading command flow:', error);
+            alert('Ошибка при загрузке flow команды: ' + error.message);
+        }
+    }
+    
+    async saveCommandFlow() {
+        // Сохраняет flow текущей команды.
+        if (!this.currentCommandId || !this.isEditingCommand) {
+            alert('Не выбрана команда для редактирования');
+            return;
+        }
+        
+        const flowData = {
+            nodes: this.nodes,
+            connections: this.connections
+        };
+        
+        try {
+            const response = await fetch(this.apiUrl(`api/bots/${this.currentBotId}/commands/${this.currentCommandId}/flow`), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(flowData)
+            });
+            
+            if (response.ok) {
+                alert('Flow команды сохранён успешно!');
+            } else {
+                const error = await response.json();
+                alert('Ошибка при сохранении: ' + (error.error || 'Неизвестная ошибка'));
+            }
+        } catch (error) {
+            console.error('Error saving command flow:', error);
+            alert('Ошибка при сохранении: ' + error.message);
+        }
+    }
+    
+    showCommandModal(command = null) {
+        // Показывает модальное окно для создания/редактирования команды.
+        const modal = document.getElementById('commandModal');
+        const title = document.getElementById('commandModalTitle');
+        const nameInput = document.getElementById('commandName');
+        const descInput = document.getElementById('commandDescription');
+        const enabledInput = document.getElementById('commandEnabled');
+        
+        if (command) {
+            title.textContent = '✏️ Редактировать команду';
+            nameInput.value = command.command;
+            descInput.value = command.description || '';
+            enabledInput.checked = command.enabled;
+            modal.dataset.commandId = command.id;
+        } else {
+            title.textContent = '📝 Новая команда';
+            nameInput.value = '';
+            descInput.value = '';
+            enabledInput.checked = true;
+            delete modal.dataset.commandId;
+        }
+        
+        modal.style.display = 'block';
+    }
+    
+    escapeHtml(text) {
+        // Экранирует HTML символы.
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+}
+
+// Глобальные функции для работы с командами
+function showCreateCommandModal() {
+    if (window.flowEditor) {
+        window.flowEditor.showCommandModal();
+    }
+}
+
+function closeCommandModal() {
+    const modal = document.getElementById('commandModal');
+    modal.style.display = 'none';
+}
+
+function saveCommandModal() {
+    const modal = document.getElementById('commandModal');
+    const nameInput = document.getElementById('commandName');
+    const descInput = document.getElementById('commandDescription');
+    const enabledInput = document.getElementById('commandEnabled');
+    
+    const command = nameInput.value.trim();
+    const description = descInput.value.trim();
+    const enabled = enabledInput.checked;
+    
+    if (!command) {
+        alert('Введите название команды');
+        return;
+    }
+    
+    if (!command.startsWith('/')) {
+        alert('Название команды должно начинаться с /');
+        return;
+    }
+    
+    if (modal.dataset.commandId) {
+        // Редактирование существующей команды
+        const commandId = parseInt(modal.dataset.commandId);
+        window.flowEditor.updateCommand(commandId, command, description, enabled);
+    } else {
+        // Создание новой команды
+        window.flowEditor.createCommand(command, description, enabled);
+    }
+    
+    closeCommandModal();
 }
 
 function addElement() {

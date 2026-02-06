@@ -68,6 +68,21 @@ def init_db():
         )
     ''')
     
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS custom_commands (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id INTEGER NOT NULL,
+            command TEXT NOT NULL,
+            description TEXT,
+            flow_data TEXT NOT NULL,
+            enabled INTEGER DEFAULT 1,
+            created_at TEXT,
+            updated_at TEXT,
+            UNIQUE(bot_id, command),
+            FOREIGN KEY (bot_id) REFERENCES bots (id) ON DELETE CASCADE
+        )
+    ''')
+    
     conn.commit()
     conn.close()
     _db_initialized = True
@@ -398,6 +413,255 @@ def migrate_add_text_restriction_fields():
         
         conn.commit()
         print("Миграция успешно выполнена")
+        
+    except sqlite3.OperationalError as e:
+        print(f"Ошибка миграции: {e}")
+    finally:
+        conn.close()
+
+# ==========================================================================
+# Функции для работы с пользовательскими командами
+# ==========================================================================
+
+def add_custom_command(bot_id, command, description='', flow_data=None):
+    """Добавляет пользовательскую команду для бота."""
+    init_db()
+    if flow_data is None:
+        flow_data = {'nodes': [], 'connections': []}
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    now = datetime.now().isoformat()
+    
+    try:
+        cursor.execute('''
+            INSERT INTO custom_commands (bot_id, command, description, flow_data, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?)
+        ''', (bot_id, command, description, json.dumps(flow_data), now, now))
+        
+        command_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return command_id
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise ValueError(f"Команда '{command}' уже существует для этого бота")
+
+def get_custom_commands(bot_id):
+    """Получает список всех пользовательских команд бота."""
+    if not os.path.exists(DB_FILE):
+        return []
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT id, bot_id, command, description, flow_data, enabled, created_at, updated_at
+        FROM custom_commands
+        WHERE bot_id = ?
+        ORDER BY command ASC
+    ''', (bot_id,))
+    
+    commands = cursor.fetchall()
+    conn.close()
+    
+    return [
+        {
+            'id': cmd[0],
+            'bot_id': cmd[1],
+            'command': cmd[2],
+            'description': cmd[3],
+            'flow_data': json.loads(cmd[4]) if cmd[4] else {'nodes': [], 'connections': []},
+            'enabled': bool(cmd[5]),
+            'created_at': cmd[6],
+            'updated_at': cmd[7]
+        }
+        for cmd in commands
+    ]
+
+def get_custom_command(bot_id, command):
+    """Получает конкретную пользовательскую команду бота."""
+    if not os.path.exists(DB_FILE):
+        return None
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT id, bot_id, command, description, flow_data, enabled, created_at, updated_at
+        FROM custom_commands
+        WHERE bot_id = ? AND command = ?
+    ''', (bot_id, command))
+    
+    cmd = cursor.fetchone()
+    conn.close()
+    
+    if cmd:
+        return {
+            'id': cmd[0],
+            'bot_id': cmd[1],
+            'command': cmd[2],
+            'description': cmd[3],
+            'flow_data': json.loads(cmd[4]) if cmd[4] else {'nodes': [], 'connections': []},
+            'enabled': bool(cmd[5]),
+            'created_at': cmd[6],
+            'updated_at': cmd[7]
+        }
+    return None
+
+def get_custom_command_by_id(command_id):
+    """Получает пользовательскую команду по ID."""
+    if not os.path.exists(DB_FILE):
+        return None
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT id, bot_id, command, description, flow_data, enabled, created_at, updated_at
+        FROM custom_commands
+        WHERE id = ?
+    ''', (command_id,))
+    
+    cmd = cursor.fetchone()
+    conn.close()
+    
+    if cmd:
+        return {
+            'id': cmd[0],
+            'bot_id': cmd[1],
+            'command': cmd[2],
+            'description': cmd[3],
+            'flow_data': json.loads(cmd[4]) if cmd[4] else {'nodes': [], 'connections': []},
+            'enabled': bool(cmd[5]),
+            'created_at': cmd[6],
+            'updated_at': cmd[7]
+        }
+    return None
+
+def update_custom_command(command_id, command=None, description=None, flow_data=None, enabled=None):
+    """Обновляет пользовательскую команду."""
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    updates = []
+    values = []
+    
+    if command is not None:
+        updates.append('command = ?')
+        values.append(command)
+    if description is not None:
+        updates.append('description = ?')
+        values.append(description)
+    if flow_data is not None:
+        updates.append('flow_data = ?')
+        values.append(json.dumps(flow_data))
+    if enabled is not None:
+        updates.append('enabled = ?')
+        values.append(1 if enabled else 0)
+    
+    updates.append('updated_at = ?')
+    values.append(datetime.now().isoformat())
+    values.append(command_id)
+    
+    if updates:
+        cursor.execute(f'UPDATE custom_commands SET {", ".join(updates)} WHERE id = ?', values)
+    
+    conn.commit()
+    conn.close()
+
+def delete_custom_command(command_id):
+    """Удаляет пользовательскую команду."""
+    if not os.path.exists(DB_FILE):
+        return
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute('DELETE FROM custom_commands WHERE id = ?', (command_id,))
+    
+    conn.commit()
+    conn.close()
+
+def save_custom_command_flow(command_id, flow_data):
+    """Сохраняет flow для пользовательской команды."""
+    init_db()
+    # Проверяем, что flow не пустой
+    nodes = flow_data.get('nodes', [])
+    if not nodes:
+        raise ValueError("Cannot save empty flow - at least one node is required")
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    now = datetime.now().isoformat()
+    
+    cursor.execute('''
+        UPDATE custom_commands SET flow_data = ?, updated_at = ? WHERE id = ?
+    ''', (json.dumps(flow_data), now, command_id))
+    
+    conn.commit()
+    conn.close()
+
+def get_custom_command_flow(command_id):
+    """Получает flow пользовательской команды."""
+    if not os.path.exists(DB_FILE):
+        return None
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT flow_data FROM custom_commands WHERE id = ?', (command_id,))
+    result = cursor.fetchone()
+    
+    conn.close()
+    
+    if result:
+        return json.loads(result[0])
+    return None
+
+def migrate_add_custom_commands_table():
+    """
+    Миграция для добавления таблицы пользовательских команд в существующую БД.
+    Эта функция безопасна для многократного вызова.
+    """
+    if not os.path.exists(DB_FILE):
+        return
+    
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    try:
+        # Проверяем, существует ли таблица custom_commands
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='custom_commands'")
+        table_exists = cursor.fetchone()
+        
+        if not table_exists:
+            # Создаём таблицу custom_commands
+            cursor.execute('''
+                CREATE TABLE custom_commands (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    bot_id INTEGER NOT NULL,
+                    command TEXT NOT NULL,
+                    description TEXT,
+                    flow_data TEXT NOT NULL,
+                    enabled INTEGER DEFAULT 1,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    UNIQUE(bot_id, command),
+                    FOREIGN KEY (bot_id) REFERENCES bots (id) ON DELETE CASCADE
+                )
+            ''')
+            print("Таблица custom_commands создана")
+        else:
+            print("Таблица custom_commands уже существует")
+        
+        conn.commit()
+        print("Миграция custom_commands выполнена успешно")
         
     except sqlite3.OperationalError as e:
         print(f"Ошибка миграции: {e}")

@@ -1,6 +1,11 @@
 import os
 from flask import Flask, render_template, request, jsonify
-from database import add_bot, get_bot, get_all_bots, update_bot, delete_bot, get_bot_logs, clear_bot_logs
+from database import (add_bot, get_bot, get_all_bots, update_bot, delete_bot,
+                     get_bot_logs, clear_bot_logs,
+                     add_custom_command, get_custom_commands, get_custom_command,
+                     get_custom_command_by_id, update_custom_command,
+                     delete_custom_command, save_custom_command_flow,
+                     get_custom_command_flow)
 from bot_manager import bot_manager
 
 # Try to load from .env file if python-dotenv is available
@@ -215,6 +220,146 @@ def clear_bot_logs_endpoint(bot_id):
     clear_bot_logs(bot_id)
     return jsonify({'message': 'Logs cleared successfully'})
 
+# ==========================================================================
+# API endpoints для пользовательских команд
+# ==========================================================================
+
+@route('/api/bots/<int:bot_id>/commands', methods=['GET'])
+def list_custom_commands(bot_id):
+    """Получает список всех пользовательских команд бота."""
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({'error': 'Bot not found'}), 404
+    
+    commands = get_custom_commands(bot_id)
+    return jsonify(commands)
+
+@route('/api/bots/<int:bot_id>/commands', methods=['POST'])
+def create_custom_command(bot_id):
+    """Создаёт новую пользовательскую команду."""
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({'error': 'Bot not found'}), 404
+    
+    data = request.json
+    command = data.get('command', '').strip()
+    description = data.get('description', '')
+    flow_data = data.get('flow_data', {'nodes': [], 'connections': []})
+    
+    if not command:
+        return jsonify({'error': 'Command name is required'}), 400
+    
+    if not command.startswith('/'):
+        command = '/' + command
+    
+    try:
+        command_id = add_custom_command(bot_id, command, description, flow_data)
+        
+        # Перезагружаем команды в запущенном боте
+        if bot_id in bot_manager.bots:
+            bot_manager.bots[bot_id].reload_custom_commands()
+        
+        cmd = get_custom_command_by_id(command_id)
+        return jsonify(cmd), 201
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+@route('/api/bots/<int:bot_id>/commands/<int:command_id>', methods=['GET'])
+def get_custom_command_by_id_endpoint(bot_id, command_id):
+    """Получает информацию о пользовательской команде."""
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({'error': 'Bot not found'}), 404
+    
+    cmd = get_custom_command_by_id(command_id)
+    if not cmd or cmd['bot_id'] != bot_id:
+        return jsonify({'error': 'Command not found'}), 404
+    
+    return jsonify(cmd)
+
+@route('/api/bots/<int:bot_id>/commands/<int:command_id>', methods=['PUT'])
+def update_custom_command_endpoint(bot_id, command_id):
+    """Обновляет пользовательскую команду."""
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({'error': 'Bot not found'}), 404
+    
+    cmd = get_custom_command_by_id(command_id)
+    if not cmd or cmd['bot_id'] != bot_id:
+        return jsonify({'error': 'Command not found'}), 404
+    
+    data = request.json
+    update_custom_command(
+        command_id,
+        command=data.get('command'),
+        description=data.get('description'),
+        flow_data=data.get('flow_data'),
+        enabled=data.get('enabled')
+    )
+    
+    # Перезагружаем команды в запущенном боте
+    if bot_id in bot_manager.bots:
+        bot_manager.bots[bot_id].reload_custom_commands()
+    
+    cmd = get_custom_command_by_id(command_id)
+    return jsonify(cmd)
+
+@route('/api/bots/<int:bot_id>/commands/<int:command_id>', methods=['DELETE'])
+def delete_custom_command_endpoint(bot_id, command_id):
+    """Удаляет пользовательскую команду."""
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({'error': 'Bot not found'}), 404
+    
+    cmd = get_custom_command_by_id(command_id)
+    if not cmd or cmd['bot_id'] != bot_id:
+        return jsonify({'error': 'Command not found'}), 404
+    
+    delete_custom_command(command_id)
+    
+    # Перезагружаем команды в запущенном боте
+    if bot_id in bot_manager.bots:
+        bot_manager.bots[bot_id].reload_custom_commands()
+    
+    return jsonify({'message': 'Command deleted successfully'})
+
+@route('/api/bots/<int:bot_id>/commands/<int:command_id>/flow', methods=['GET'])
+def get_custom_command_flow_endpoint(bot_id, command_id):
+    """Получает flow пользовательской команды."""
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({'error': 'Bot not found'}), 404
+    
+    cmd = get_custom_command_by_id(command_id)
+    if not cmd or cmd['bot_id'] != bot_id:
+        return jsonify({'error': 'Command not found'}), 404
+    
+    flow_data = get_custom_command_flow(command_id)
+    return jsonify(flow_data or {'nodes': [], 'connections': []})
+
+@route('/api/bots/<int:bot_id>/commands/<int:command_id>/flow', methods=['POST'])
+def save_custom_command_flow_endpoint(bot_id, command_id):
+    """Сохраняет flow для пользовательской команды."""
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({'error': 'Bot not found'}), 404
+    
+    cmd = get_custom_command_by_id(command_id)
+    if not cmd or cmd['bot_id'] != bot_id:
+        return jsonify({'error': 'Command not found'}), 404
+    
+    flow_data = request.json
+    try:
+        save_custom_command_flow(command_id, flow_data)
+        
+        # Перезагружаем команды в запущенном боте
+        if bot_id in bot_manager.bots:
+            bot_manager.bots[bot_id].reload_custom_commands()
+        
+        return jsonify({'message': 'Flow saved successfully'})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
 started = False
 
 @app.before_request
@@ -223,8 +368,9 @@ def startup():
     if not started:
         try:
             # Выполняем миграцию базы данных
-            from database import migrate_add_text_restriction_fields
+            from database import migrate_add_text_restriction_fields, migrate_add_custom_commands_table
             migrate_add_text_restriction_fields()
+            migrate_add_custom_commands_table()
             
             bots = get_all_bots()
             for bot in bots:
