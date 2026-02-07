@@ -1661,10 +1661,33 @@ input:checked + .debug-slider:before {
     color: #667eea;
 }
 
-/* Убираем outline при фокусе для команд */
+/* Убираем стандартный outline при фокусе для команд */
 .command-item:focus,
 .command-item:focus-visible {
     outline: none;
+}
+
+/* Добавляем постоянный фиолетовый цвет для активной команды - текст остается фиолетовым */
+.command-item.active .command-header strong {
+    color: #667eea !important;
+}
+
+/* Убеждаемся, что активная команда сохраняет свои стили при фокусе */
+.command-item.active:focus,
+.command-item.active:focus-visible {
+    outline: none;
+    background: #ffffff;
+    border: 2px solid #667eea;
+    border-left-width: 4px;
+    box-shadow: 0 2px 12px rgba(102, 126, 234, 0.25);
+}
+
+/* Предотвращаем изменение стилей активной команды при hover */
+.command-item.active:hover {
+    background: #ffffff;
+    border: 2px solid #667eea;
+    border-left-width: 4px;
+    box-shadow: 0 2px 12px rgba(102, 126, 234, 0.25);
 }
 
 .command-header {

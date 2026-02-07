@@ -4,20 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Редактор диалоговых потоков</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/flow.css') }}?v=13">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/flow.css') }}?v=14">
 </head>
 <body>
     <div id="app">
         <div class="sidebar">
             <h3>Редактор ботов</h3>
-            
-            <div class="sidebar-section">
-                <h4>Выберите бота</h4>
-                <select id="botSelect">
-                    <option value="new">+ Создать нового бота...</option>
-                </select>
-            </div>
-            
+
             <div class="sidebar-section">
                 <h4>Пользовательские команды</h4>
                 <div id="commandsList">
@@ -172,7 +165,9 @@
     <script>
         // Set the base URL for API calls
         window.API_BASE_URL = '{{ base_url }}';
+        // Set the bot ID from URL parameter
+        window.BOT_ID = {{ bot_id }};
     </script>
-    <script src="{{ url_for('static', filename='js/flow.js') }}?v=24"></script>
+    <script src="{{ url_for('static', filename='js/flow.js') }}?v=25"></script>
 </body>
 </html>

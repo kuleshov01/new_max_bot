@@ -7,6 +7,26 @@ function apiUrl(path) {
     return baseUrl + '/' + path.replace(/^\/+/, '');
 }
 
+// Функция для сворачивания/разворачивания блоков
+function toggleCollapse(collapseId) {
+    const collapseElement = document.getElementById(collapseId);
+    const toggleElement = document.getElementById(collapseId.replace('Collapse', 'Toggle'));
+    
+    if (collapseElement.classList.contains('show')) {
+        // Сворачиваем
+        collapseElement.classList.remove('show');
+        if (toggleElement) {
+            toggleElement.textContent = '▶';
+        }
+    } else {
+        // Разворачиваем
+        collapseElement.classList.add('show');
+        if (toggleElement) {
+            toggleElement.textContent = '▼';
+        }
+    }
+}
+
 async function loadBots() {
     try {
         const response = await fetch(apiUrl('api/bots'));
@@ -60,7 +80,7 @@ function renderBots() {
                             : `<button class="btn btn-success" onclick="startBot(${bot.id})">Запустить</button>`
                         }
                         <button class="btn btn-info" onclick="restartBot(${bot.id})">Перезапуск</button>
-                        <a href="${apiUrl('flow-editor')}?botId=${bot.id}" class="btn btn-secondary">🎨 Диалог</a>
+                        <a href="${apiUrl('flow-editor')}/${bot.id}" class="btn btn-secondary">🎨 Диалог</a>
                         <button class="btn btn-dark" onclick="openLogsModal(${bot.id})">📋 Логи</button>
                         <button class="btn btn-primary" onclick="openEditModal(${bot.id})">Настройки</button>
                         <button class="btn btn-danger" onclick="deleteBot(${bot.id})">Удалить</button>
@@ -75,6 +95,10 @@ async function createBot() {
     const name = document.getElementById('botName').value.trim();
     const token = document.getElementById('botToken').value.trim();
     const base_url = document.getElementById('botBaseUrl').value.trim();
+    
+    // Настройки ограничения текстовых сообщений
+    const text_restriction_enabled = document.getElementById('createTextRestrictionEnabled').checked;
+    const text_restriction_warning = document.getElementById('createTextRestrictionWarning').value.trim() || 'Для управления ботом, пожалуйста, используйте кнопки ⬇️';
 
     if (!name || !token) {
         alert('Пожалуйста, заполните название и токен');
@@ -91,8 +115,8 @@ async function createBot() {
                 name,
                 token,
                 base_url,
-                start_message: '',
-                menu_config: []
+                text_restriction_enabled,
+                text_restriction_warning
             })
         });
         
@@ -170,7 +194,7 @@ async function deleteBot(botId) {
     }
 }
 
-function openEditModal(botId) {
+async function openEditModal(botId) {
     const bot = bots.find(b => b.id === botId);
     if (!bot) return;
     
@@ -184,13 +208,22 @@ function openEditModal(botId) {
     tokenInput.dataset.isMasked = 'true'; // Флаг, что токен замаскирован
     
     document.getElementById('editBotBaseUrl').value = bot.base_url;
-    document.getElementById('editBotStartMessage').value = bot.start_message || '';
-    document.getElementById('editBotMenuConfig').value = JSON.stringify(bot.menu_config || [], null, 2);
     
     // Настройки ограничения текстовых сообщений
     document.getElementById('editTextRestrictionEnabled').checked = bot.text_restriction_enabled || false;
     document.getElementById('editTextRestrictionWarning').value = bot.text_restriction_warning || 'Для управления ботом, пожалуйста, используйте кнопки ⬇️';
-    document.getElementById('editAllowedCommands').value = JSON.stringify(bot.allowed_commands || ['/start', '/help'], null, 2);
+    
+    // Загружаем список включённых команд
+    try {
+        const response = await fetch(apiUrl(`api/bots/${botId}/enabled-commands`));
+        if (response.ok) {
+            const enabledCommands = await response.json();
+            document.getElementById('enabledCommandsList').textContent = enabledCommands.join(', ');
+        }
+    } catch (error) {
+        console.error('Error loading enabled commands:', error);
+        document.getElementById('enabledCommandsList').textContent = '/start';
+    }
     
     // Сбрасываем кнопку показа токена
     const toggleBtn = document.getElementById('toggleTokenBtn');
@@ -269,13 +302,10 @@ async function updateBot() {
     const tokenInput = document.getElementById('editBotToken');
     let token = tokenInput.value.trim();
     const base_url = document.getElementById('editBotBaseUrl').value.trim();
-    const start_message = document.getElementById('editBotStartMessage').value.trim();
-    const menu_config_str = document.getElementById('editBotMenuConfig').value.trim();
     
     // Настройки ограничения текстовых сообщений
     const text_restriction_enabled = document.getElementById('editTextRestrictionEnabled').checked;
-    const text_restriction_warning = document.getElementById('editTextRestrictionWarning').value.trim();
-    const allowed_commands_str = document.getElementById('editAllowedCommands').value.trim();
+    const text_restriction_warning = document.getElementById('editTextRestrictionWarning').value.trim() || 'Для управления ботом, пожалуйста, используйте кнопки ⬇️';
     
     if (!name || !token) {
         alert('Пожалуйста, заполните название и токен');
@@ -285,26 +315,6 @@ async function updateBot() {
     // Если токен замаскирован (содержит маскирующие символы), используем полный токен из data-атрибута
     if (token.includes('•••') && tokenInput.dataset.fullToken) {
         token = tokenInput.dataset.fullToken;
-    }
-    
-    let menu_config = [];
-    if (menu_config_str) {
-        try {
-            menu_config = JSON.parse(menu_config_str);
-        } catch (e) {
-            alert('Ошибка в формате JSON для меню');
-            return;
-        }
-    }
-    
-    let allowed_commands = ['/start', '/help'];
-    if (allowed_commands_str) {
-        try {
-            allowed_commands = JSON.parse(allowed_commands_str);
-        } catch (e) {
-            alert('Ошибка в формате JSON для разрешённых команд');
-            return;
-        }
     }
     
     try {
@@ -317,11 +327,8 @@ async function updateBot() {
                 name,
                 token,
                 base_url,
-                start_message,
-                menu_config,
                 text_restriction_enabled,
-                text_restriction_warning,
-                allowed_commands
+                text_restriction_warning
             })
         });
         

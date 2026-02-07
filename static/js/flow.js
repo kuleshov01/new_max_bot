@@ -25,6 +25,8 @@ class FlowEditor {
         this.resizeStart = { x: 0, y: 0, width: 0, height: 0 };
         this.currentEditingNodeId = null;
         this.connectionClicked = false; // Флаг для предотвращения сброса выделения связи
+        this.commandClicked = false; // Флаг для предотвращения сброса выделения команды
+        this.suppressCommandsRender = false; // Флаг для предотвращения перерисовки списка команд
         
         // Touch support properties
         this.lastTouchDistance = 0;
@@ -51,73 +53,29 @@ class FlowEditor {
         this.nodesContainer = document.getElementById('nodes');
         this.connectionsSvg = document.getElementById('connections');
         this.nodeProperties = document.getElementById('nodeProperties');
-        this.botSelect = document.getElementById('botSelect');
-        
-        console.log('=== INIT ===', 'canvas:', !!this.canvas, 'nodesContainer:', !!this.nodesContainer, 'botSelect:', !!this.botSelect);
+
+        console.log('=== INIT ===', 'canvas:', !!this.canvas, 'nodesContainer:', !!this.nodesContainer, 'BOT_ID:', window.BOT_ID);
 
         this.setupEventListeners();
         this.loadBotFromUrl();
-        this.loadBots();
 
-        if (!this.currentBotId) {
-            this.createStartNode();
-        }
         this.loadCommands(); // Загружаем команды при инициализации
         this.updateZoomLevel();
         this.render();
         console.log('=== INIT END ===');
     }
 
-    
+
     loadBotFromUrl() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const botId = urlParams.get('botId');
+        const botId = window.BOT_ID;
         if (botId) {
             this.currentBotId = parseInt(botId);
             this.loadBotFlow(this.currentBotId);
+        } else {
+            console.error('BOT_ID не установлен в window.BOT_ID');
         }
     }
-    
-    async loadBots() {
-        console.log('=== LOAD BOTS START ===');
-        console.log('=== LOAD BOTS ===', 'API_BASE_URL:', window.API_BASE_URL);
-        console.log('=== LOAD BOTS ===', 'apiUrl:', this.apiUrl('api/bots'));
-        console.log('=== LOAD BOTS ===', 'botSelect:', this.botSelect);
-        
-        try {
-            const response = await fetch(this.apiUrl('api/bots'));
-            console.log('=== LOAD BOTS ===', 'response status:', response.status);
-            
-            if (!response.ok) {
-                console.error('=== LOAD BOTS ERROR ===', 'response not ok:', response.status);
-                return;
-            }
-            
-            const bots = await response.json();
-            console.log('=== LOAD BOTS ===', 'bots:', bots);
 
-            if (!this.botSelect) {
-                console.error('=== LOAD BOTS ERROR ===', 'botSelect is null!');
-                return;
-            }
-
-            this.botSelect.innerHTML = '<option value="new">+ Создать нового бота...</option>';
-            bots.forEach(bot => {
-                const option = document.createElement('option');
-                option.value = bot.id;
-                option.textContent = bot.name;
-                if (bot.id === this.currentBotId) {
-                    option.selected = true;
-                    console.log('=== LOAD BOTS ===', 'selected bot:', bot.id, bot.name);
-                }
-                this.botSelect.appendChild(option);
-            });
-            console.log('=== LOAD BOTS END ===', 'total bots:', bots.length);
-        } catch (error) {
-            console.error('=== LOAD BOTS ERROR ===', error);
-        }
-    }
-    
     async loadBotFlow(botId) {
         try {
             const response = await fetch(this.apiUrl(`api/bots/${botId}/flow`));
@@ -161,23 +119,21 @@ class FlowEditor {
         this.canvas.addEventListener('mouseup', this.handleCanvasMouseUp.bind(this));
         this.canvas.addEventListener('wheel', this.handleWheel.bind(this));
         this.canvas.addEventListener('dblclick', this.handleCanvasDoubleClick.bind(this));
-        
+
         // Pointer events for mobile/tablet support (works better than touch events)
         this.canvas.addEventListener('pointerdown', this.handlePointerDown.bind(this));
         this.canvas.addEventListener('pointermove', this.handlePointerMove.bind(this));
         this.canvas.addEventListener('pointerup', this.handlePointerUp.bind(this));
         this.canvas.addEventListener('pointercancel', this.handlePointerUp.bind(this));
-        
+
         // Also bind to nodes container
         this.nodesContainer.addEventListener('pointerdown', this.handlePointerDown.bind(this));
         this.nodesContainer.addEventListener('pointermove', this.handlePointerMove.bind(this));
         this.nodesContainer.addEventListener('pointerup', this.handlePointerUp.bind(this));
         this.nodesContainer.addEventListener('pointercancel', this.handlePointerUp.bind(this));
-        
+
         document.addEventListener('keydown', this.handleKeyDown.bind(this));
-        
-        this.botSelect.addEventListener('change', this.handleBotChange.bind(this));
-        
+
         // Обработчик клика по связям (делегирование через document для надежности)
         document.addEventListener('click', this.handleConnectionClick.bind(this));
         document.addEventListener('contextmenu', this.handleConnectionRightClick.bind(this));
@@ -628,12 +584,17 @@ class FlowEditor {
         } else {
             this.isDraggingCanvas = true;
             this.lastMousePos = { x: e.clientX, y: e.clientY };
-            console.log('=== TOUCH EMPTY SPACE ===', 'clearing selectedConnection:', this.selectedConnection);
+            console.log('=== TOUCH EMPTY SPACE ===', 'clearing selectedConnection:', this.selectedConnection, 'commandClicked:', this.commandClicked, 'currentCommandId:', this.currentCommandId);
             this.selectedNode = null;
-            this.selectedConnection = null; // Снимаем выделение со связи
+            // Не снимаем выделение со связи если был клик на команду
+            if (!this.commandClicked) {
+                this.selectedConnection = null; // Снимаем выделение со связи
+            }
             this.showNodeProperties(null);
             this.updateDeleteConnectionButton();
+            console.log('=== BEFORE RENDER ===', 'currentCommandId:', this.currentCommandId);
             this.render();
+            console.log('=== AFTER RENDER ===', 'currentCommandId:', this.currentCommandId);
         }
     }
     
@@ -1085,16 +1046,21 @@ class FlowEditor {
                 };
             }
         } else {
-            console.log('=== POINTER DOWN ON EMPTY SPACE ===', 'clearing selectedConnection:', this.selectedConnection);
+            console.log('=== POINTER DOWN ON EMPTY SPACE ===', 'clearing selectedConnection:', this.selectedConnection, 'commandClicked:', this.commandClicked, 'currentCommandId:', this.currentCommandId);
             // Touching empty space - prepare for canvas panning
             this.isDraggingCanvas = true;
             this.draggedNode = null;
             this.lastMousePos = { x: e.clientX, y: e.clientY };
             this.selectedNode = null;
-            this.selectedConnection = null; // Снимаем выделение со связи
+            // Не снимаем выделение со связи если был клик на команду
+            if (!this.commandClicked) {
+                this.selectedConnection = null; // Снимаем выделение со связи
+            }
             this.showNodeProperties(null);
             this.updateDeleteConnectionButton();
+            console.log('=== BEFORE RENDER ===', 'currentCommandId:', this.currentCommandId);
             this.render();
+            console.log('=== AFTER RENDER ===', 'currentCommandId:', this.currentCommandId);
         }
     }
 
@@ -1424,16 +1390,6 @@ class FlowEditor {
             }, 100);
         } else {
             console.error('Context menu element not found!');
-        }
-    }
-    
-    handleBotChange(e) {
-        const botId = e.target.value;
-        if (botId === 'new') {
-            this.createNewBot();
-        } else if (botId) {
-            this.currentBotId = parseInt(botId);
-            this.loadBotFlow(this.currentBotId);
         }
     }
 
@@ -2135,45 +2091,16 @@ class FlowEditor {
             node.buttons[buttonIndex].payload = payload;
         }
     }
-    
-    async createNewBot() {
-        const name = prompt('Введите название нового бота:');
-        if (!name) return;
-        
-        const token = prompt('Введите токен бота:');
-        if (!token) return;
-        
-        try {
-            const response = await fetch(this.apiUrl('api/bots'), {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ name, token })
-            });
-            
-            if (response.ok) {
-                const bot = await response.json();
-                this.currentBotId = bot.id;
-                await this.loadBots();
-                this.nodes = [];
-                this.connections = [];
-                this.createStartNode();
-                this.render();
-                alert(`Бот "${name}" создан успешно!`);
-            } else {
-                alert('Ошибка при создании бота');
-            }
-        } catch (error) {
-            console.error('Error creating bot:', error);
-            alert('Ошибка при создании бота');
-        }
-    }
-    
+
     render() {
         this.syncConnections();
         this.renderNodes();
         this.renderConnections();
+        
+        // Сбрасываем флаг после перерисовки
+        if (this.suppressCommandsRender) {
+            setTimeout(() => { this.suppressCommandsRender = false; }, 50);
+        }
     }
 
     renderNodes() {
@@ -2877,13 +2804,21 @@ class FlowEditor {
             return;
         }
         
+        console.log('=== RENDER COMMANDS LIST ===', 'currentCommandId:', this.currentCommandId, 'suppressCommandsRender:', this.suppressCommandsRender);
+        
         list.innerHTML = commands.map(cmd => {
             const isSystem = cmd.isSystem || false;
             // Активная команда: либо текущая выбранная, либо /start если ничего не выбрано
             const isActive = this.currentCommandId === cmd.id || (!this.currentCommandId && cmd.id === 'start');
             
+            console.log('=== COMMAND ===', 'cmd.id:', cmd.id, 'isActive:', isActive);
+            
             return `
-            <div class="command-item ${isActive ? 'active' : ''} ${isSystem ? 'system-command' : ''}" data-command-id="${cmd.id}" onclick="window.flowEditor.editCommandFlow('${cmd.id}')">
+            <div class="command-item ${isActive ? 'active' : ''} ${isSystem ? 'system-command' : ''}" 
+                 data-command-id="${cmd.id}" 
+                 tabindex="-1"
+                 onclick="window.flowEditor.editCommandFlow('${cmd.id}')"
+                 onmousedown="window.flowEditor.handleCommandMouseDown(event, '${cmd.id}')">
                 <div class="command-header">
                     <strong>${this.escapeHtml(cmd.command)}</strong>
                     ${!isSystem ? `
@@ -3030,11 +2965,16 @@ class FlowEditor {
     async editCommandFlow(commandId) {
         // Загружает flow команды для редактирования.
         
+        // Устанавливаем флаг, что был клик на команду
+        this.commandClicked = true;
+        
         // Если это системная команда /start, загружаем основной flow бота
         if (commandId === 'start') {
             this.currentCommandId = null;
             this.isEditingCommand = false;
             this.loadBotFlow(this.currentBotId);
+            // Сбрасываем флаг после короткой задержки
+            setTimeout(() => { this.commandClicked = false; }, 100);
             return;
         }
         
@@ -3049,6 +2989,8 @@ class FlowEditor {
                 this.maxNodeId();
                 this.render();
                 this.loadCommands(); // Обновляем список для подсветки активной команды
+                // Сбрасываем флаг после короткой задержки
+                setTimeout(() => { this.commandClicked = false; }, 100);
             } else {
                 alert('Ошибка при загрузке flow команды');
             }
@@ -3056,6 +2998,20 @@ class FlowEditor {
             console.error('Error loading command flow:', error);
             alert('Ошибка при загрузке flow команды: ' + error.message);
         }
+    }
+    
+    handleCommandMouseDown(event, commandId) {
+        // Обрабатывает нажатие мыши на команду для предотвращения случайного снятия фокуса
+        console.log('=== COMMAND MOUSE DOWN ===', 'commandId:', commandId);
+        this.commandClicked = true;
+        
+        // Предотвращаем всплытие события, чтобы оно не достигло канваса
+        if (event) {
+            event.stopPropagation();
+        }
+        
+        // Сбрасываем флаг после короткой задержки
+        setTimeout(() => { this.commandClicked = false; }, 100);
     }
     
     async saveCommandFlow() {

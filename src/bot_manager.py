@@ -47,10 +47,8 @@ class BotInstance:
             'text_restriction_warning',
             "Для управления ботом, пожалуйста, используйте кнопки ⬇️"
         )
-        allowed_commands = self.bot_config.get(
-            'allowed_commands',
-            ['/start', '/help']
-        )
+        # Получаем разрешённые команды автоматически: /start + все включённые пользовательские команды
+        allowed_commands = self._get_enabled_commands()
         text_restriction_enabled = self.bot_config.get('text_restriction_enabled', True)
         
         self.text_restriction = TextMessageRestriction(
@@ -62,6 +60,22 @@ class BotInstance:
         self.log('INFO', f'Инициализация бота ID: {self.bot_id}, имя: "{self.bot_name}"')
         self.log('INFO', f'Ограничение текстовых сообщений: {"включено" if text_restriction_enabled else "выключено"}')
         self.log('INFO', f'Загружено {len(self.custom_commands)} пользовательских команд')
+
+    def _get_enabled_commands(self):
+        """Получает список включённых команд для ограничения текстовых сообщений.
+        
+        Возвращает:
+            list: Список команд, которые не будут блокироваться (/start + все включённые пользовательские команды)
+        """
+        enabled_commands = ['/start']
+        try:
+            commands = get_custom_commands(self.bot_id)
+            for cmd in commands:
+                if cmd['enabled']:
+                    enabled_commands.append(cmd['command'])
+        except Exception as e:
+            self.log('ERROR', f'Ошибка получения списка команд: {e}')
+        return enabled_commands
 
     def load_custom_commands(self):
         """Загружает пользовательские команды из базы данных."""
@@ -77,9 +91,13 @@ class BotInstance:
             self.custom_commands = {}
 
     def reload_custom_commands(self):
-        """Перезагружает пользовательские команды из базы данных."""
+        """Перезагружает пользовательские команды из базы данных и обновляет разрешённые команды."""
         self.load_custom_commands()
+        # Обновляем список разрешённых команд в ограничителе
+        new_allowed_commands = self._get_enabled_commands()
+        self.text_restriction.allowed_commands = new_allowed_commands
         self.log('INFO', f'Перезагружено {len(self.custom_commands)} пользовательских команд')
+        self.log('INFO', f'Обновлён список разрешённых команд: {new_allowed_commands}')
 
     def is_custom_command(self, text):
         """Проверяет, является ли текст пользовательской командой."""
@@ -807,7 +825,8 @@ class BotInstance:
                     'text_restriction_warning',
                     'Для управления ботом, пожалуйста, используйте кнопки ⬇️'
                 )
-                allowed_commands = bot_config.get('allowed_commands', ['/start', '/help'])
+                # Получаем разрешённые команды автоматически из включённых пользовательских команд
+                allowed_commands = self._get_enabled_commands()
                 text_restriction_enabled = bot_config.get('text_restriction_enabled', True)
                 
                 self.text_restriction.warning_message = warning_text
@@ -815,6 +834,7 @@ class BotInstance:
                 self.text_restriction.enabled = text_restriction_enabled
                 
                 self.log('INFO', f'Настройки ограничения перезагружены: {"включено" if text_restriction_enabled else "выключено"}')
+                self.log('INFO', f'Разрешённые команды: {allowed_commands}')
         except Exception as e:
             self.log('ERROR', f'Ошибка при перезагрузке настроек ограничения: {e}')
 

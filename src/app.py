@@ -49,9 +49,12 @@ def index():
 def get_config():
     return jsonify({'base_url': APPLICATION_ROOT})
 
-@route('/flow-editor')
-def flow_editor():
-    return render_template('flow_editor.html', base_url=APPLICATION_ROOT)
+@route('/flow-editor/<int:bot_id>')
+def flow_editor(bot_id):
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({'error': 'Bot not found'}), 404
+    return render_template('flow_editor.html', base_url=APPLICATION_ROOT, bot_id=bot_id)
 
 @route('/api/bots', methods=['GET'])
 def list_bots():
@@ -119,8 +122,7 @@ def update_bot_by_id(bot_id):
         token=data.get('token'),
         base_url=data.get('base_url'),
         text_restriction_enabled=data.get('text_restriction_enabled'),
-        text_restriction_warning=data.get('text_restriction_warning'),
-        allowed_commands=data.get('allowed_commands')
+        text_restriction_warning=data.get('text_restriction_warning')
     )
 
     bot = get_bot(bot_id)
@@ -233,6 +235,29 @@ def list_custom_commands(bot_id):
     
     commands = get_custom_commands(bot_id)
     return jsonify(commands)
+
+@route('/api/bots/<int:bot_id>/enabled-commands', methods=['GET'])
+def get_enabled_commands(bot_id):
+    """Получает список включённых команд бота для ограничения текстовых сообщений.
+    
+    Возвращает все команды, которые не будут блокироваться ограничителем:
+    - /start (всегда включена)
+    - Все включённые пользовательские команды (enabled = 1)
+    """
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({'error': 'Bot not found'}), 404
+    
+    # Начинаем с /start
+    enabled_commands = ['/start']
+    
+    # Добавляем все включённые пользовательские команды
+    commands = get_custom_commands(bot_id)
+    for cmd in commands:
+        if cmd['enabled']:
+            enabled_commands.append(cmd['command'])
+    
+    return jsonify(enabled_commands)
 
 @route('/api/bots/<int:bot_id>/commands', methods=['POST'])
 def create_custom_command(bot_id):

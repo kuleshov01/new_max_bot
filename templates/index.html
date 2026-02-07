@@ -12,7 +12,6 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h1>Панель управления чат-ботами</h1>
             <div>
-                <a href="{{ base_url }}/flow-editor" class="btn btn-info me-2">🎨 Редактор диалогов</a>
                 <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createBotModal">
                     + Создать бота
                 </button>
@@ -44,6 +43,41 @@
                         <div class="mb-3">
                             <label class="form-label">Base URL</label>
                             <input type="text" class="form-control" id="botBaseUrl" value="https://platform-api.max.ru">
+                        </div>
+                        
+                        <!-- Настройки ограничения текстовых сообщений -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-info text-white d-flex justify-content-between align-items-center" style="cursor: pointer;" onclick="toggleCollapse('createTextRestrictionCollapse')">
+                                <h6 class="mb-0">🚫 Ограничение текстовых сообщений</h6>
+                                <span id="createTextRestrictionToggle">▼</span>
+                            </div>
+                            <div class="collapse" id="createTextRestrictionCollapse">
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="createTextRestrictionEnabled" checked>
+                                            <label class="form-check-label" for="createTextRestrictionEnabled">
+                                                <strong>Только кнопки</strong> — запретить произвольный текст
+                                            </label>
+                                        </div>
+                                        <small class="form-text text-muted">
+                                            Когда включено, пользователи не смогут отправлять произвольные текстовые сообщения.
+                                            Им будет показано предупреждение с просьбой использовать кнопки.
+                                        </small>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Текст предупреждения</label>
+                                        <textarea class="form-control" id="createTextRestrictionWarning" rows="3"
+                                                  placeholder="Текст, который увидит пользователь при попытке отправить текст">Для управления ботом, пожалуйста, используйте кнопки ⬇️</textarea>
+                                        <small class="form-text text-muted">
+                                            Поддерживается HTML-разметка. Например: <code><b>Жирный</b></code>, <code><i>Курсив</i></code>
+                                        </small>
+                                    </div>
+                                    <div class="alert alert-info mb-0">
+                                        <strong>ℹ️ Разрешённые команды:</strong> /start (всегда) + все включённые пользовательские команды из редактора диалогов
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                     </form>
@@ -87,48 +121,37 @@
                         
                         <!-- Настройки ограничения текстовых сообщений -->
                         <div class="card mb-3">
-                            <div class="card-header bg-info text-white">
+                            <div class="card-header bg-info text-white d-flex justify-content-between align-items-center" style="cursor: pointer;" onclick="toggleCollapse('editTextRestrictionCollapse')">
                                 <h6 class="mb-0">🚫 Ограничение текстовых сообщений</h6>
+                                <span id="editTextRestrictionToggle">▶</span>
                             </div>
-                            <div class="card-body">
-                                <div class="mb-3">
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="editTextRestrictionEnabled">
-                                        <label class="form-check-label" for="editTextRestrictionEnabled">
-                                            <strong>Только кнопки</strong> — запретить произвольный текст
-                                        </label>
+                            <div class="collapse" id="editTextRestrictionCollapse">
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="editTextRestrictionEnabled">
+                                            <label class="form-check-label" for="editTextRestrictionEnabled">
+                                                <strong>Только кнопки</strong> — запретить произвольный текст
+                                            </label>
+                                        </div>
+                                        <small class="form-text text-muted">
+                                            Когда включено, пользователи не смогут отправлять произвольные текстовые сообщения.
+                                            Им будет показано предупреждение с просьбой использовать кнопки.
+                                        </small>
                                     </div>
-                                    <small class="form-text text-muted">
-                                        Когда включено, пользователи не смогут отправлять произвольные текстовые сообщения.
-                                        Им будет показано предупреждение с просьбой использовать кнопки.
-                                    </small>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Текст предупреждения</label>
-                                    <textarea class="form-control" id="editTextRestrictionWarning" rows="3"
-                                              placeholder="Текст, который увидит пользователь при попытке отправить текст"></textarea>
-                                    <small class="form-text text-muted">
-                                        Поддерживается HTML-разметка. Например: <code><b>Жирный</b></code>, <code><i>Курсив</i></code>
-                                    </small>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Разрешённые команды</label>
-                                    <input type="text" class="form-control" id="editAllowedCommands"
-                                           placeholder='["/start", "/help", "/settings"]'>
-                                    <small class="form-text text-muted">
-                                        JSON массив команд, которые не будут блокироваться. Пример: <code>["/start", "/help"]</code>
-                                    </small>
+                                    <div class="mb-3">
+                                        <label class="form-label">Текст предупреждения</label>
+                                        <textarea class="form-control" id="editTextRestrictionWarning" rows="3"
+                                                  placeholder="Текст, который увидит пользователь при попытке отправить текст"></textarea>
+                                        <small class="form-text text-muted">
+                                            Поддерживается HTML-разметка. Например: <code><b>Жирный</b></code>, <code><i>Курсив</i></code>
+                                        </small>
+                                    </div>
+                                    <div class="alert alert-info mb-0">
+                                        <strong>ℹ️ Разрешённые команды:</strong> <span id="enabledCommandsList">/start</span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label class="form-label">Стартовое сообщение</label>
-                            <textarea class="form-control" id="editBotStartMessage" rows="4"></textarea>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Меню (JSON формат)</label>
-                            <textarea class="form-control" id="editBotMenuConfig" rows="6"></textarea>
                         </div>
                     </form>
                 </div>
