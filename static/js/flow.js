@@ -1120,8 +1120,6 @@ class FlowEditor {
             this.render();
         }
     }
-        this.render();
-    }
 
     // Helper method to get distance between two touch points
     getTouchDistance(touches) {

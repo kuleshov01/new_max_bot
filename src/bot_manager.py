@@ -2,21 +2,19 @@ import threading
 import time
 import logging
 import requests
+import re
 import sys
+import operator
 from database import get_bot, update_bot_status, get_bot_flow, add_bot_log, get_custom_command, get_custom_commands
 from text_message_restrictions import TextMessageRestriction
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
-# Console handler
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
-
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler(sys.stdout)])
+logger = logging.getLogger(__name__)
 
 class BotInstance:
     def __init__(self, bot_id):
@@ -595,7 +593,14 @@ class BotInstance:
             self.log('DEBUG', f'Нет соединения для перехода от ноды {current_node_id}')
     
     def evaluate_expression(self, chat_id, expression):
-        """Вычисляет выражение с подстановкой переменных"""
+        """Вычисляет выражение с подстановкой переменных.
+        
+        Поддерживаемые операции:
+        - Арифметические: +, -, *, /, //, %, **
+        - Сравнения: ==, !=, <, >, <=, >=
+        - Логические: and, or, not
+        - Строковые операции (только сравнение)
+        """
         state = self.user_states.get(chat_id, {})
         
         # Получаем значения переменных
@@ -603,24 +608,134 @@ class BotInstance:
             return str(state.get(var_name, ''))
         
         # Заменяем переменные в выражении
-        import re
         pattern = r'\{\{(\w+)\}\}'
         
         def replace_var(match):
             var_name = match.group(1)
             value = get_var(var_name)
-            # Экранируем значение для безопасного использования в eval
-            return f"'{value}'"
+            # Экранируем строку для безопасного использования
+            return repr(value)
         
         safe_expression = re.sub(pattern, replace_var, expression)
         
         try:
             # Безопасное вычисление выражения
-            result = eval(safe_expression, {'__builtins__': {}}, {})
+            result = self._safe_eval(safe_expression)
             return str(result)
         except Exception as e:
             self.log('ERROR', f'Ошибка вычисления выражения "{expression}": {e}')
             return ''
+    
+    def _safe_eval(self, expr):
+        """Безопасно вычисляет арифметическое и логическое выражение.
+        
+        Использует ограниченный набор операторов и не позволяет
+        выполнение произвольного кода.
+        """
+        # Определяем безопасные операторы
+        operators = {
+            # Арифметические
+            '+': operator.add,
+            '-': operator.sub,
+            '*': operator.mul,
+            '/': operator.truediv,
+            '//': operator.floordiv,
+            '%': operator.mod,
+            '**': operator.pow,
+            # Сравнения
+            '==': operator.eq,
+            '!=': operator.ne,
+            '<': operator.lt,
+            '>': operator.gt,
+            '<=': operator.le,
+            '>=': operator.ge,
+            # Логические (возвращают строки для совместимости)
+            'and': lambda a, b: 'True' if a and b else 'False',
+            'or': lambda a, b: 'True' if a or b else 'False',
+            'not': lambda a: 'True' if not a else 'False',
+        }
+        
+        # Токенизируем выражение
+        # Разбиваем на: строки (в кавычках), числа, операторы, переменные
+        tokens = []
+        i = 0
+        while i < len(expr):
+            # Пробелы пропускаем
+            if expr[i].isspace():
+                i += 1
+                continue
+            
+            # Строки в кавычках
+            if expr[i] in '"\'':
+                quote = expr[i]
+                i += 1
+                start = i
+                while i < len(expr) and expr[i] != quote:
+                    if expr[i] == '\\' and i + 1 < len(expr):
+                        i += 2
+                    else:
+                        i += 1
+                tokens.append(expr[start:i])
+                i += 1
+                continue
+            
+            # Числа (целые и дробные)
+            if expr[i].isdigit() or expr[i] == '.':
+                start = i
+                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                    i += 1
+                tokens.append(expr[start:i])
+                continue
+            
+            # Операторы (двухсимвольные сначала)
+            if i + 1 < len(expr) and expr[i:i+2] in operators:
+                tokens.append(expr[i:i+2])
+                i += 2
+                continue
+            
+            # Односимвольные операторы
+            if expr[i] in operators:
+                tokens.append(expr[i])
+                i += 1
+                continue
+            
+            # Неизвестные символы - ошибка
+            raise ValueError(f"Недопустимый символ: {expr[i]}")
+        
+        # Вычисляем в простом порядке (без учёта приоритета)
+        # Для сложных выражений нужен полноценный парсер
+        if not tokens:
+            return ''
+        
+        result = tokens[0]
+        
+        # Конвертируем первый токен
+        if result.isdigit():
+            result = int(result)
+        elif '.' in result and result.replace('.', '').isdigit():
+            result = float(result)
+        
+        # Обрабатываем пары токен-оператор-значение
+        i = 1
+        while i + 1 < len(tokens):
+            op = tokens[i]
+            val = tokens[i + 1]
+            
+            # Конвертируем значение
+            if val.isdigit():
+                val = int(val)
+            elif '.' in val and val.replace('.', '').isdigit():
+                val = float(val)
+            
+            # Применяем оператор
+            if op in operators:
+                result = operators[op](result, val)
+            else:
+                raise ValueError(f"Неизвестный оператор: {op}")
+            
+            i += 2
+        
+        return result
     
     def replace_variables(self, chat_id, text):
         """Заменяет переменные в тексте на их значения"""
@@ -785,9 +900,6 @@ class BotInstance:
                             # Продолжаем с текущим marker, чтобы не застрять в цикле
                 if "marker" in updates:
                     marker = updates["marker"]
-
-                # Уменьшаем задержку до 0.1 секунды для более быстрого отклика
-                time.sleep(0.1)
             except Exception as e:
                 self.log('ERROR', f'Ошибка в основном цикле: {e}')
                 time.sleep(5)

@@ -392,11 +392,6 @@ def startup():
     global started
     if not started:
         try:
-            # Выполняем миграцию базы данных
-            from database import migrate_add_text_restriction_fields, migrate_add_custom_commands_table
-            migrate_add_text_restriction_fields()
-            migrate_add_custom_commands_table()
-            
             bots = get_all_bots()
             for bot in bots:
                 if bot['status'] == 'running':
