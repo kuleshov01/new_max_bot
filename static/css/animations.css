@@ -1,0 +1,378 @@
+/**
+ * Анимации появления для UI элементов
+ * Задача 4.1: Анимации появления
+ */
+
+/* ============================================
+   Fade In - Плавное появление
+   ============================================ */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ============================================
+   Slide Up - Появление снизу вверх
+   ============================================ */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================
+   Slide Down - Появление сверху вниз
+   ============================================ */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================
+   Scale In - Появление с масштабированием
+   ============================================ */
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ============================================
+   Slide In Left - Появление слева
+   ============================================ */
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ============================================
+   Slide In Right - Появление справа
+   ============================================ */
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ============================================
+   Применение анимаций к элементам
+   ============================================ */
+
+/* Bottom Sheet - выдвижная панель */
+.bottom-sheet.open {
+  animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Context Menu - контекстное меню */
+.context-menu.visible {
+  animation: scaleIn 0.2s ease;
+}
+
+/* Tooltip - всплывающая подсказка */
+.tooltip {
+  animation: fadeIn 0.15s ease;
+}
+
+/* Modal - модальное окно */
+.modal.show {
+  animation: fadeIn 0.2s ease;
+}
+
+.modal-content {
+  animation: scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Node - узел на канвасе */
+.node {
+  animation: scaleIn 0.2s ease;
+}
+
+/* Sidebar Section - секция сайдбара */
+.section-content.open {
+  animation: slideDown 0.3s ease;
+}
+
+/* Command Item - элемент списка команд */
+.command-item {
+  animation: slideInLeft 0.2s ease;
+}
+
+/* Tool Item - элемент инструментов */
+.tool-item {
+  animation: slideInRight 0.2s ease;
+}
+
+/* Connection Line - линия соединения */
+.connection-line.drawing {
+  animation: drawLine 0.5s ease;
+}
+
+/* ============================================
+   Анимации соединений
+   ============================================ */
+
+/* Пульсация коннектора */
+@keyframes pulse-connector {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(99, 102, 241, 0.6);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(99, 102, 241, 0.9);
+    transform: scale(1.1);
+  }
+}
+
+/* Применение пульсации к коннекторам */
+.connector.pulsing,
+.node-connector-target.pulsing,
+.api-connector.pulsing {
+  animation: pulse-connector 1s infinite;
+}
+
+/* Линия соединения с анимацией рисования */
+@keyframes draw-line {
+  from {
+    stroke-dashoffset: 1000;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.connection-line.drawing {
+  stroke-dasharray: 1000;
+  animation: draw-line 0.5s ease;
+}
+
+/* ============================================
+   Дополнительные анимации для полировки
+   ============================================ */
+
+/* Pulse - пульсация для выделения */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Shake - тряска для ошибки */
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  75% {
+    transform: translateX(5px);
+  }
+}
+
+.shake {
+  animation: shake 0.3s ease;
+}
+
+/* Bounce - отскок */
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+.bounce {
+  animation: bounce 0.5s ease;
+}
+
+/* Rotate - вращение */
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.rotate {
+  animation: rotate 1s linear infinite;
+}
+
+/* ============================================
+   Микро-взаимодействия
+   ============================================ */
+
+/* Ripple-эффект для кнопок (Material Design) */
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(99, 102, 241, 0.3);
+  transform: scale(0);
+  animation: ripple 0.6s ease-out;
+  pointer-events: none;
+}
+
+@keyframes ripple {
+  to {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+/* Loader - спиннер загрузки */
+.loader {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--bg-tertiary);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Маленький loader */
+.loader-sm {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--bg-tertiary);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Большой loader */
+.loader-lg {
+  width: 60px;
+  height: 60px;
+  border: 4px solid var(--bg-tertiary);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Success-check - анимация галочки успеха */
+@keyframes checkmark {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.success-check {
+  animation: checkmark 0.5s ease;
+}
+
+/* Success-pulse - пульсация успеха */
+@keyframes success-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+}
+
+.success-pulse {
+  animation: success-pulse 0.6s ease;
+}
+
+/* Error-shake - тряска для ошибки (уже есть выше, дублируем для наглядности) */
+.error-shake {
+  animation: shake 0.3s ease;
+}
+
+/* Error-pulse - пульсация ошибки */
+@keyframes error-pulse {
+  0%, 100% {
+    background-color: var(--error);
+  }
+  50% {
+    background-color: #f87171;
+  }
+}
+
+.error-pulse {
+  animation: error-pulse 0.5s ease;
+}
+
+/* ============================================
+   Утилитарные классы для анимаций
+   ============================================ */
+
+/* Отключить анимацию (для пользователей, которые предпочитают без анимации) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Ускоренные анимации для быстрой отдачи */
+.animate-fast {
+  animation-duration: 0.15s;
+}
+
+/* Замедленные анимации для плавности */
+.animate-slow {
+  animation-duration: 0.5s;
+}
+
+/* Задержка анимации */
+.animate-delay-1 {
+  animation-delay: 0.1s;
+}
+
+.animate-delay-2 {
+  animation-delay: 0.2s;
+}
+
+.animate-delay-3 {
+  animation-delay: 0.3s;
+}

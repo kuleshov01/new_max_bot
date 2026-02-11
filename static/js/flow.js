@@ -37,6 +37,24 @@ class FlowEditor {
         
         // Pointer tracking for pinch-to-zoom
         this.activePointers = new Map();  // pointerId -> {x, y}
+        
+        // Gesture tracking properties
+        this.longPressTimer = null;
+        this.longPressDuration = 500; // ms
+        this.longPressNode = null;
+        this.lastTapTime = 0;
+        this.doubleTapDelay = 300; // ms
+        this.swipeStartX = 0;
+        this.swipeStartY = 0;
+        this.swipeThreshold = 50; // px
+        this.edgeSwipeThreshold = 30; // px от края экрана
+        this.isEdgeSwipe = false;
+        this.gestureInProgress = false;
+
+        // Undo/Redo history
+        this.undoStack = [];
+        this.redoStack = [];
+        this.maxHistorySize = 50; // Максимальный размер истории
 
         // Helper function to build API URL with base path
         this.apiUrl = (path) => {
@@ -57,12 +75,354 @@ class FlowEditor {
         console.log('=== INIT ===', 'canvas:', !!this.canvas, 'nodesContainer:', !!this.nodesContainer, 'BOT_ID:', window.BOT_ID);
 
         this.setupEventListeners();
+        this.setupRippleEffect(); // Добавляем ripple-эффект
+        this.setupBottomSheets();
+        this.setupAccordion(); // Добавляем аккордеон для sidebar
         this.loadBotFromUrl();
 
         this.loadCommands(); // Загружаем команды при инициализации
         this.updateZoomLevel();
         this.render();
         console.log('=== INIT END ===');
+    }
+
+    setupRippleEffect() {
+        // Добавляем ripple-эффект для всех кнопок
+        const buttons = document.querySelectorAll('.menu-btn, .icon-btn');
+        buttons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                this.createRipple(e, button);
+            });
+        });
+
+        // Обработчики для кнопок инструментов
+        const toolButtons = document.querySelectorAll('.tool-btn');
+        toolButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                const tool = button.getAttribute('data-tool');
+                this.handleToolClick(tool);
+                this.createRipple(e, button);
+            });
+        });
+
+        // Обработчики для кнопок зума
+        const resetZoomBtn = document.getElementById('reset-zoom');
+        if (resetZoomBtn) {
+            resetZoomBtn.addEventListener('click', (e) => {
+                this.zoomReset();
+                this.createRipple(e, resetZoomBtn);
+            });
+        }
+
+        const zoomInfoBtn = document.getElementById('zoom-info');
+        if (zoomInfoBtn) {
+            zoomInfoBtn.addEventListener('click', (e) => {
+                this.zoomReset();
+                this.createRipple(e, zoomInfoBtn);
+            });
+        }
+
+        // Обработчики для Bottom Sheets
+        this.setupBottomSheets();
+    }
+
+    setupBottomSheets() {
+        // Клик на меню → открыть commands sheet
+        const menuBtn = document.querySelector('.menu-btn');
+        const commandsSheet = document.getElementById('commands-sheet');
+        if (menuBtn && commandsSheet) {
+            menuBtn.addEventListener('click', () => {
+                this.openBottomSheet(commandsSheet);
+            });
+        }
+
+        // Клик на закрыть → закрыть sheet
+        const closeButtons = document.querySelectorAll('.close-btn');
+        closeButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const sheet = button.closest('.bottom-sheet');
+                if (sheet) {
+                    this.closeBottomSheet(sheet);
+                }
+            });
+        });
+
+        // Клик вне sheet → закрыть
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('bottom-sheet')) {
+                this.closeBottomSheet(e.target);
+            }
+        });
+
+        // Обработчик для формы свойств узла
+        const propertiesForm = document.getElementById('node-properties-form');
+        if (propertiesForm) {
+            propertiesForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.saveNodeProperties();
+            });
+        }
+    }
+
+    setupAccordion() {
+        // Обработчики для заголовков секций аккордеона
+        const sectionHeaders = document.querySelectorAll('.section-header');
+        sectionHeaders.forEach(header => {
+            header.addEventListener('click', (e) => {
+                const section = header.getAttribute('data-section');
+                this.toggleSection(section);
+            });
+        });
+
+        // Обработчики для drag-and-drop инструментов
+        const toolItems = document.querySelectorAll('.tool-item');
+        toolItems.forEach(item => {
+            item.addEventListener('dragstart', (e) => {
+                const tool = item.getAttribute('data-tool');
+                e.dataTransfer.setData('tool', tool);
+                item.style.opacity = '0.5';
+            });
+
+            item.addEventListener('dragend', (e) => {
+                item.style.opacity = '1';
+            });
+
+            // Клик на инструмент → добавить узел
+            item.addEventListener('click', (e) => {
+                const tool = item.getAttribute('data-tool');
+                this.handleToolClick(tool);
+            });
+        });
+    }
+
+    toggleSection(sectionName) {
+        const header = document.querySelector(`.section-header[data-section="${sectionName}"]`);
+        const content = document.getElementById(`${sectionName}-section`);
+        
+        if (!header || !content) return;
+
+        const isCollapsed = content.classList.contains('collapsed');
+        
+        if (isCollapsed) {
+            // Развернуть секцию
+            content.classList.remove('collapsed');
+            header.setAttribute('aria-expanded', 'true');
+            // Изменить стрелку с ▶ на ▼
+            const span = header.querySelector('span');
+            if (span) {
+                span.textContent = span.textContent.replace('▶', '▼');
+            }
+        } else {
+            // Свернуть секцию
+            content.classList.add('collapsed');
+            header.setAttribute('aria-expanded', 'false');
+            // Изменить стрелку с ▼ на ▶
+            const span = header.querySelector('span');
+            if (span) {
+                span.textContent = span.textContent.replace('▼', '▶');
+            }
+        }
+    }
+
+    openPropertiesSheet(node) {
+        const propertiesSheet = document.getElementById('properties-sheet');
+        if (!propertiesSheet) return;
+
+        // Заполняем форму данными узла
+        this.populatePropertiesForm(node);
+
+        // Обновляем заголовок с типом узла
+        const nodeTypeSpan = propertiesSheet.querySelector('.node-type');
+        if (nodeTypeSpan) {
+            const typeNames = {
+                'message': 'Сообщение',
+                'menu': 'Меню',
+                'api_request': 'API запрос',
+                'condition': 'Условие',
+                'transform': 'Трансформация'
+            };
+            nodeTypeSpan.textContent = typeNames[node.type] || node.type;
+        }
+
+        // Открываем sheet
+        this.openBottomSheet(propertiesSheet);
+    }
+
+    populatePropertiesForm(node) {
+        const form = document.getElementById('node-properties-form');
+        if (!form) return;
+
+        // Очищаем форму
+        form.innerHTML = '';
+
+        // Добавляем поля в зависимости от типа узла
+        switch(node.type) {
+            case 'message':
+            case 'menu':
+                this.addTextField(form, 'text', 'Текст:', node.text || '');
+                this.addCheckboxField(form, 'format', 'Формат Markdown', node.format === 'markdown');
+                break;
+            case 'api_request':
+                this.addTextField(form, 'url', 'URL:', node.url || '');
+                this.addTextField(form, 'method', 'Метод:', node.method || 'GET');
+                this.addCheckboxField(form, 'debug', 'Режим отладки', node.debug || false);
+                break;
+            case 'condition':
+                this.addTextField(form, 'condition', 'Условие:', node.condition || '');
+                break;
+            case 'transform':
+                this.addTextField(form, 'expression', 'Выражение:', node.expression || '');
+                break;
+        }
+
+        // Сохраняем ссылку на текущий узел
+        this.currentEditingNode = node;
+    }
+
+    addTextField(form, name, label, value) {
+        const labelEl = document.createElement('label');
+        labelEl.textContent = label;
+        form.appendChild(labelEl);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.name = name;
+        input.value = value;
+        form.appendChild(input);
+    }
+
+    addCheckboxField(form, name, label, checked) {
+        const labelEl = document.createElement('label');
+        labelEl.style.display = 'flex';
+        labelEl.style.alignItems = 'center';
+        labelEl.style.gap = '8px';
+
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.name = name;
+        input.checked = checked;
+
+        const text = document.createTextNode(label);
+
+        labelEl.appendChild(input);
+        labelEl.appendChild(text);
+        form.appendChild(labelEl);
+    }
+
+    saveNodeProperties() {
+        if (!this.currentEditingNode) return;
+
+        const form = document.getElementById('node-properties-form');
+        const formData = new FormData(form);
+
+        // Обновляем данные узла
+        for (const [key, value] of formData.entries()) {
+            if (key === 'format' && value === 'on') {
+                this.currentEditingNode.format = 'markdown';
+            } else if (key === 'debug' && value === 'on') {
+                this.currentEditingNode.debug = true;
+            } else {
+                this.currentEditingNode[key] = value;
+            }
+        }
+
+        // Перерисовываем узел
+        this.render();
+
+        // Закрываем sheet
+        const propertiesSheet = document.getElementById('properties-sheet');
+        this.closeBottomSheet(propertiesSheet);
+
+        // Сохраняем flow
+        this.saveFlow();
+    }
+
+    openBottomSheet(sheet) {
+        sheet.classList.add('open');
+    }
+
+    closeBottomSheet(sheet) {
+        sheet.classList.remove('open');
+    }
+
+    handleToolClick(tool) {
+        switch(tool) {
+            case 'message':
+                this.addElement();
+                break;
+            case 'api':
+                this.addApiNode();
+                break;
+            case 'condition':
+                this.addConditionNode();
+                break;
+            case 'transform':
+                this.addTransformNode();
+                break;
+        }
+    }
+
+    createRipple(event, button) {
+        const circle = document.createElement('span');
+        const diameter = Math.max(button.clientWidth, button.clientHeight);
+        const radius = diameter / 2;
+
+        const rect = button.getBoundingClientRect();
+        
+        circle.style.width = circle.style.height = `${diameter}px`;
+        circle.style.left = `${event.clientX - rect.left - radius}px`;
+        circle.style.top = `${event.clientY - rect.top - radius}px`;
+        circle.classList.add('ripple');
+
+        // Удаляем существующие ripple элементы
+        const ripple = button.getElementsByClassName('ripple')[0];
+        if (ripple) {
+            ripple.remove();
+        }
+
+        button.appendChild(circle);
+    }
+
+    // ============================================
+    // Тактильная обратная связь (Vibration API)
+    // ============================================
+
+    /**
+     * Базовая функция вибрации
+     * @param {number|number[]} pattern - Паттерн вибрации (мс или массив мс)
+     */
+    vibrate(pattern) {
+        if ('vibrate' in navigator) {
+            navigator.vibrate(pattern);
+        }
+    }
+
+    /**
+     * Лёгкая вибрация (15ms) — при тапе на кнопку
+     */
+    vibrateLight() {
+        this.vibrate(15);
+    }
+
+    /**
+     * Средняя вибрация (25ms) — при выборе узла
+     */
+    vibrateMedium() {
+        this.vibrate(25);
+    }
+
+    /**
+     * Сильная вибрация (50ms) — при ошибке
+     */
+    vibrateHeavy() {
+        this.vibrate(50);
+    }
+
+    /**
+     * Двойная вибрация (15ms + 50ms + 15ms) — при успешном действии
+     */
+    vibrateDouble() {
+        this.vibrate([15, 50, 15]);
     }
 
 
@@ -133,10 +493,17 @@ class FlowEditor {
         this.nodesContainer.addEventListener('pointercancel', this.handlePointerUp.bind(this));
 
         document.addEventListener('keydown', this.handleKeyDown.bind(this));
+        document.addEventListener('keyup', this.handleKeyUp.bind(this));
 
         // Обработчик клика по связям (делегирование через document для надежности)
         document.addEventListener('click', this.handleConnectionClick.bind(this));
         document.addEventListener('contextmenu', this.handleConnectionRightClick.bind(this));
+
+        // Обработчик контекстного меню для узлов
+        this.nodesContainer.addEventListener('contextmenu', this.handleNodeContextMenu.bind(this));
+
+        // Настройка обработчиков для контекстного меню узлов
+        this.setupNodeContextMenuHandlers();
     }
     
     createStartNode() {
@@ -733,11 +1100,26 @@ class FlowEditor {
     }
     
     handleWheel(e) {
-        e.preventDefault();
-        const delta = e.deltaY > 0 ? 0.9 : 1.1;
-        this.scale *= delta;
-        this.scale = Math.min(Math.max(this.scale, 0.3), 3);
-        this.updateZoomLevel();
+        // Ctrl + Wheel — Зум
+        if (e.ctrlKey) {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -0.1 : 0.1;
+            this.scale = Math.min(Math.max(this.scale + delta, 0.3), 3);
+            this.updateZoomLevel();
+            this.render();
+            return;
+        }
+
+        // Обычный Wheel — Панорамирование (только если не в режиме ввода)
+        if (!e.target.closest('input, textarea, select')) {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            this.scale *= delta;
+            this.scale = Math.min(Math.max(this.scale, 0.3), 3);
+            this.updateZoomLevel();
+            this.render();
+        }
+    }
         this.render();
     }
 
@@ -891,6 +1273,37 @@ class FlowEditor {
             return;
         }
         
+        // Handle gestures for single touch pointer
+        if (e.pointerType === 'touch' && this.activePointers.size === 1) {
+            // Check for edge swipe
+            const screenWidth = window.innerWidth;
+            const screenHeight = window.innerHeight;
+            
+            if (e.clientX <= this.edgeSwipeThreshold ||
+                e.clientX >= screenWidth - this.edgeSwipeThreshold ||
+                e.clientY <= this.edgeSwipeThreshold ||
+                e.clientY >= screenHeight - this.edgeSwipeThreshold) {
+                this.isEdgeSwipe = true;
+                this.swipeStartX = e.clientX;
+                this.swipeStartY = e.clientY;
+                console.log('Edge swipe detected at:', e.clientX, e.clientY);
+            }
+            
+            // Check for double tap
+            const currentTime = Date.now();
+            const timeSinceLastTap = currentTime - this.lastTapTime;
+            
+            if (timeSinceLastTap < this.doubleTapDelay) {
+                // Double tap detected
+                console.log('Double tap detected');
+                this.handleDoubleTap(e);
+                this.lastTapTime = 0;
+                this.gestureInProgress = true;
+                return;
+            }
+            this.lastTapTime = currentTime;
+        }
+        
         const rect = this.canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left - this.offset.x) / this.scale;
         const y = (e.clientY - rect.top - this.offset.y) / this.scale;
@@ -899,6 +1312,14 @@ class FlowEditor {
         const target = document.elementFromPoint(e.clientX, e.clientY);
         const connectionEl = target?.closest('.connection-line');
         const nodeEl = target?.closest('.node');
+        
+        // Start long press timer for touch on nodes
+        if (e.pointerType === 'touch' && nodeEl && !this.gestureInProgress) {
+            this.longPressNode = nodeEl.dataset.id;
+            this.longPressTimer = setTimeout(() => {
+                this.handleLongPress(nodeEl, e);
+            }, this.longPressDuration);
+        }
         
         // Check if touching a connection first (works for both mouse and touch)
         if (connectionEl) {
@@ -1070,6 +1491,33 @@ class FlowEditor {
             this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         }
         
+        // Cancel long press if pointer moved significantly
+        if (this.longPressTimer) {
+            const pointer = this.activePointers.get(e.pointerId);
+            if (pointer) {
+                const dx = Math.abs(pointer.x - e.clientX);
+                const dy = Math.abs(pointer.y - e.clientY);
+                if (dx > 10 || dy > 10) {
+                    clearTimeout(this.longPressTimer);
+                    this.longPressTimer = null;
+                    this.longPressNode = null;
+                }
+            }
+        }
+        
+        // Handle edge swipe
+        if (this.isEdgeSwipe && e.pointerType === 'touch' && this.activePointers.size === 1) {
+            const dx = e.clientX - this.swipeStartX;
+            const dy = e.clientY - this.swipeStartY;
+            
+            // Check if swipe is significant
+            if (Math.abs(dx) > this.swipeThreshold || Math.abs(dy) > this.swipeThreshold) {
+                this.handleEdgeSwipe(dx, dy);
+                this.isEdgeSwipe = false;
+                return;
+            }
+        }
+        
         // Check if pinch zoom (2+ pointers) - only for touch
         if (e.pointerType === 'touch' && this.activePointers.size >= 2) {
             e.preventDefault();
@@ -1169,6 +1617,19 @@ class FlowEditor {
         this.activePointers.delete(e.pointerId);
         console.log('=== POINTER UP ===', 'pointerType:', e.pointerType, 'active:', this.activePointers.size, 'selectedConnection:', this.selectedConnection);
         
+        // Clear long press timer
+        if (this.longPressTimer) {
+            clearTimeout(this.longPressTimer);
+            this.longPressTimer = null;
+            this.longPressNode = null;
+        }
+        
+        // Reset gesture flags
+        if (this.activePointers.size === 0) {
+            this.isEdgeSwipe = false;
+            this.gestureInProgress = false;
+        }
+        
         // Reset pinch zoom state if less than 2 pointers (only for touch)
         if (e.pointerType === 'touch' && this.activePointers.size < 2) {
             this.lastTouchDistance = 0;
@@ -1192,6 +1653,14 @@ class FlowEditor {
             if (target) {
                 const toNodeId = target.dataset.id;
                 
+                // Hide connectors on source node
+                if (this.draggedConnector.type === 'node') {
+                    const sourceNodeEl = document.querySelector(`.node[data-id="${this.draggedConnector.id}"]`);
+                    if (sourceNodeEl) {
+                        this.hideConnectors(sourceNodeEl);
+                    }
+                }
+                
                 if (this.draggedConnector.type === 'button') {
                     this.addConnection(this.draggedConnector.id, toNodeId, this.draggedConnector.fromNode);
                 } else if (this.draggedConnector.type === 'node') {
@@ -1201,7 +1670,17 @@ class FlowEditor {
                 } else if (this.draggedConnector.type === 'condition') {
                     this.addConditionConnection(this.draggedConnector.fromNode, toNodeId, this.draggedConnector.connectionType);
                 }
+                
+                // Vibrate to confirm connection
+                this.vibrateMedium();
             } else {
+                // Connection cancelled - hide connectors
+                if (this.draggedConnector.type === 'node') {
+                    const sourceNodeEl = document.querySelector(`.node[data-id="${this.draggedConnector.id}"]`);
+                    if (sourceNodeEl) {
+                        this.hideConnectors(sourceNodeEl);
+                    }
+                }
                 this.renderConnections();
             }
             this.draggedConnector = null;
@@ -1224,6 +1703,182 @@ class FlowEditor {
             x: (p1.x + p2.x) / 2,
             y: (p1.y + p2.y) / 2
         };
+    }
+    
+    // Gesture handlers
+    
+    handleLongPress(nodeEl, event) {
+        console.log('=== LONG PRESS ===', 'nodeId:', nodeEl.dataset.id);
+        
+        const nodeId = nodeEl.dataset.id;
+        const node = this.nodes.find(n => n.id === nodeId);
+        
+        if (!node) return;
+        
+        // Check if node can be connected from (not API or condition nodes)
+        if (node.type === 'api_request' || node.type === 'condition') {
+            // For API and condition nodes, just select them
+            nodeEl.classList.add('long-press-active');
+            
+            this.vibrateHeavy();
+            
+            this.selectNode(nodeId);
+            
+            setTimeout(() => {
+                nodeEl.classList.remove('long-press-active');
+            }, 300);
+            
+            this.longPressTimer = null;
+            this.longPressNode = null;
+            return;
+        }
+        
+        // For regular nodes, enter connect mode
+        console.log('=== ENTERING CONNECT MODE ===', 'nodeId:', nodeId);
+        
+        // Visual feedback - highlight the node
+        nodeEl.classList.add('long-press-active');
+        
+        // Vibrate for tactile feedback (if supported)
+        this.vibrateHeavy();
+        
+        // Select the node
+        this.selectNode(nodeId);
+        
+        // Show connectors with animation
+        this.showConnectors(nodeEl);
+        
+        // Enter connect mode for this node
+        this.draggedConnector = { type: 'node', id: nodeId };
+        this.gestureInProgress = true;
+        
+        // Initialize temp connection
+        const rect = this.canvas.getBoundingClientRect();
+        const x = (event.clientX - rect.left - this.offset.x) / this.scale;
+        const y = (event.clientY - rect.top - this.offset.y) / this.scale;
+        
+        this.tempConnection = {
+            startX: x,
+            startY: y,
+            endX: x,
+            endY: y
+        };
+        
+        // Remove highlight after a short delay
+        setTimeout(() => {
+            nodeEl.classList.remove('long-press-active');
+        }, 300);
+        
+        // Clear timer
+        this.longPressTimer = null;
+        this.longPressNode = null;
+    }
+    
+    showConnectors(nodeEl) {
+        console.log('=== SHOWING CONNECTORS ===', 'nodeId:', nodeEl.dataset.id);
+        
+        // Show and animate all connectors on this node
+        const connectors = nodeEl.querySelectorAll('.connector, .node-connector-target');
+        connectors.forEach(connector => {
+            connector.style.display = 'block';
+            connector.classList.add('pulsing');
+        });
+        
+        // Also show button connectors if in menu node
+        const buttonConnectors = nodeEl.querySelectorAll('.node-button .connector');
+        buttonConnectors.forEach(connector => {
+            connector.style.display = 'block';
+            connector.classList.add('pulsing');
+        });
+    }
+    
+    hideConnectors(nodeEl) {
+        console.log('=== HIDING CONNECTORS ===', 'nodeId:', nodeEl.dataset.id);
+        
+        // Hide and remove animation from all connectors
+        const connectors = nodeEl.querySelectorAll('.connector, .node-connector-target');
+        connectors.forEach(connector => {
+            connector.classList.remove('pulsing');
+        });
+        
+        const buttonConnectors = nodeEl.querySelectorAll('.node-button .connector');
+        buttonConnectors.forEach(connector => {
+            connector.classList.remove('pulsing');
+        });
+    }
+    
+    handleDoubleTap(event) {
+        console.log('=== DOUBLE TAP ===');
+        
+        // Vibrate for tactile feedback
+        this.vibrateDouble();
+        
+        // Reset zoom to default
+        this.zoomReset();
+        
+        // Visual feedback
+        this.showZoomIndicator();
+    }
+    
+    handleEdgeSwipe(dx, dy) {
+        console.log('=== EDGE SWIPE ===', 'dx:', dx, 'dy:', dy);
+        
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        
+        // Determine swipe direction
+        const isLeftEdge = this.swipeStartX <= this.edgeSwipeThreshold;
+        const isRightEdge = this.swipeStartX >= screenWidth - this.edgeSwipeThreshold;
+        const isTopEdge = this.swipeStartY <= this.edgeSwipeThreshold;
+        const isBottomEdge = this.swipeStartY >= screenHeight - this.edgeSwipeThreshold;
+        
+        // Vibrate for tactile feedback
+        this.vibrateMedium();
+        
+        // Left edge swipe → open commands sheet
+        if (isLeftEdge && dx > this.swipeThreshold) {
+            const commandsSheet = document.getElementById('commands-sheet');
+            if (commandsSheet) {
+                this.openBottomSheet(commandsSheet);
+            }
+        }
+        // Right edge swipe → open properties sheet (if node selected)
+        else if (isRightEdge && dx < -this.swipeThreshold) {
+            if (this.selectedNode) {
+                const node = this.nodes.find(n => n.id === this.selectedNode);
+                if (node) {
+                    this.openPropertiesSheet(node);
+                }
+            }
+        }
+        // Bottom edge swipe → open properties sheet
+        else if (isBottomEdge && dy < -this.swipeThreshold) {
+            if (this.selectedNode) {
+                const node = this.nodes.find(n => n.id === this.selectedNode);
+                if (node) {
+                    this.openPropertiesSheet(node);
+                }
+            }
+        }
+    }
+    
+    showZoomIndicator() {
+        // Create or update zoom indicator
+        let indicator = document.getElementById('zoom-indicator');
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.id = 'zoom-indicator';
+            indicator.className = 'zoom-indicator';
+            document.body.appendChild(indicator);
+        }
+        
+        indicator.textContent = `${Math.round(this.scale * 100)}%`;
+        indicator.classList.add('visible');
+        
+        // Hide after a short delay
+        setTimeout(() => {
+            indicator.classList.remove('visible');
+        }, 1000);
     }
     
     zoomIn() {
@@ -1252,6 +1907,41 @@ class FlowEditor {
     }
     
     handleKeyDown(e) {
+        // Игнорируем горячие клавиши если фокус на input/textarea
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+            return;
+        }
+
+        // Ctrl + S — Сохранить
+        if (e.ctrlKey && e.key === 's') {
+            e.preventDefault();
+            this.saveFlow();
+            this.showNotification('💾 Проект сохранён');
+            return;
+        }
+
+        // Ctrl + Z — Отмена
+        if (e.ctrlKey && e.key === 'z') {
+            e.preventDefault();
+            this.undo();
+            return;
+        }
+
+        // Ctrl + Y — Повтор
+        if (e.ctrlKey && e.key === 'y') {
+            e.preventDefault();
+            this.redo();
+            return;
+        }
+
+        // Ctrl + D — Дублировать узел
+        if (e.ctrlKey && e.key === 'd') {
+            e.preventDefault();
+            this.duplicateSelectedNode();
+            return;
+        }
+
+        // Delete — Удалить выбранное
         if (e.key === 'Delete') {
             // Сначала проверяем выделенную связь
             if (this.selectedConnection) {
@@ -1263,9 +1953,232 @@ class FlowEditor {
                 this.deleteNode(this.selectedNode);
                 e.preventDefault();
             }
+            return;
+        }
+
+        // 1, 2, 3 — Переключение режимов
+        if (e.key === '1') {
+            e.preventDefault();
+            this.setMode('edit');
+            this.showNotification('✏️ Режим редактирования');
+            return;
+        }
+        if (e.key === '2') {
+            e.preventDefault();
+            this.setMode('connect');
+            this.showNotification('🔗 Режим соединения');
+            return;
+        }
+        if (e.key === '3') {
+            e.preventDefault();
+            this.setMode('view');
+            this.showNotification('👁️ Режим просмотра');
+            return;
+        }
+
+        // Esc — Снять выделение
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            this.deselectAll();
+            return;
+        }
+
+        // F — Поиск узла
+        if (e.key === 'f' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            e.preventDefault();
+            this.openSearch();
+            return;
+        }
+
+        // Space — Панорамирование (начало)
+        if (e.key === ' ' && !e.repeat) {
+            e.preventDefault();
+            this.enterPanMode();
+            return;
         }
     }
-    
+
+    handleKeyUp(e) {
+        // Space — Панорамирование (конец)
+        if (e.key === ' ') {
+            this.exitPanMode();
+        }
+    }
+
+    // ==========================================================================
+    // Функции горячих клавиш
+    // ==========================================================================
+
+    undo() {
+        console.log('=== UNDO ===', 'stack size:', this.undoStack.length);
+        if (this.undoStack.length === 0) {
+            this.showNotification('ℹ️ Нечего отменять');
+            return;
+        }
+
+        // Сохраняем текущее состояние в redoStack
+        const currentState = this.saveState();
+        this.redoStack.push(currentState);
+
+        // Восстанавливаем предыдущее состояние
+        const previousState = this.undoStack.pop();
+        this.restoreState(previousState);
+
+        this.showNotification('↩️ Отмена');
+    }
+
+    redo() {
+        console.log('=== REDO ===', 'stack size:', this.redoStack.length);
+        if (this.redoStack.length === 0) {
+            this.showNotification('ℹ️ Нечего повторять');
+            return;
+        }
+
+        // Сохраняем текущее состояние в undoStack
+        const currentState = this.saveState();
+        this.undoStack.push(currentState);
+
+        // Восстанавливаем следующее состояние
+        const nextState = this.redoStack.pop();
+        this.restoreState(nextState);
+
+        this.showNotification('↪️ Повтор');
+    }
+
+    saveState() {
+        // Сохраняем текущее состояние для undo/redo
+        return {
+            nodes: JSON.parse(JSON.stringify(this.nodes)),
+            connections: JSON.parse(JSON.stringify(this.connections)),
+            selectedNode: this.selectedNode,
+            selectedConnection: this.selectedConnection,
+            scale: this.scale,
+            offset: { ...this.offset }
+        };
+    }
+
+    restoreState(state) {
+        // Восстанавливаем состояние
+        this.nodes = JSON.parse(JSON.stringify(state.nodes));
+        this.connections = JSON.parse(JSON.stringify(state.connections));
+        this.selectedNode = state.selectedNode;
+        this.selectedConnection = state.selectedConnection;
+        this.scale = state.scale;
+        this.offset = { ...state.offset };
+
+        this.render();
+        this.updateZoomLevel();
+    }
+
+    saveToHistory() {
+        // Сохраняем состояние в историю перед изменением
+        const state = this.saveState();
+        this.undoStack.push(state);
+
+        // Ограничиваем размер истории
+        if (this.undoStack.length > this.maxHistorySize) {
+            this.undoStack.shift();
+        }
+
+        // Очищаем redoStack при новом действии
+        this.redoStack = [];
+    }
+
+    duplicateSelectedNode() {
+        console.log('=== DUPLICATE SELECTED NODE ===');
+        if (!this.selectedNode || this.selectedNode === 'start') {
+            this.showNotification('ℹ️ Выберите узел для дублирования');
+            return;
+        }
+
+        const node = this.nodes.find(n => n.id === this.selectedNode);
+        if (!node) return;
+
+        // Сохраняем состояние в историю
+        this.saveToHistory();
+
+        // Создаём копию узла
+        const newNode = JSON.parse(JSON.stringify(node));
+        newNode.id = `node_${this.nodeIdCounter++}`;
+        newNode.x = node.x + 50;
+        newNode.y = node.y + 50;
+
+        // Генерируем новые ID для кнопок
+        if (newNode.buttons) {
+            newNode.buttons.forEach((btn, index) => {
+                btn.id = `btn_${this.nodeIdCounter}_${index}`;
+                btn.nextNodeId = null;
+            });
+        }
+
+        this.nodes.push(newNode);
+        this.render();
+        this.selectNode(newNode.id);
+
+        this.showNotification('📋 Узел дублирован');
+
+        // Вибрация для тактильной обратной связи
+        this.vibrateDouble();
+    }
+
+    deselectAll() {
+        console.log('=== DESELECT ALL ===');
+        this.selectedNode = null;
+        this.selectedConnection = null;
+        this.showNodeProperties(null);
+        this.updateDeleteConnectionButton();
+        this.updateNodeSelection();
+        this.render();
+        this.showNotification('ℹ️ Выделение снято');
+    }
+
+    openSearch() {
+        console.log('=== OPEN SEARCH ===');
+        // TODO: Реализовать поиск узлов
+        this.showNotification('🔍 Поиск узлов (в разработке)');
+    }
+
+    enterPanMode() {
+        console.log('=== ENTER PAN MODE ===');
+        this.canvas.style.cursor = 'grab';
+        this.isPanning = true;
+        this.showNotification('✋ Режим панорамирования');
+    }
+
+    exitPanMode() {
+        console.log('=== EXIT PAN MODE ===');
+        if (this.isPanning) {
+            this.canvas.style.cursor = 'grab';
+            this.isPanning = false;
+        }
+    }
+
+    showNotification(message) {
+        console.log('=== NOTIFICATION ===', message);
+
+        // Создаём или обновляем уведомление
+        let notification = document.getElementById('notification');
+        if (!notification) {
+            notification = document.createElement('div');
+            notification.id = 'notification';
+            notification.className = 'notification';
+            document.body.appendChild(notification);
+        }
+
+        notification.textContent = message;
+        notification.classList.add('visible');
+
+        // Удаляем предыдущий таймер
+        if (this.notificationTimer) {
+            clearTimeout(this.notificationTimer);
+        }
+
+        // Скрываем уведомление через 2 секунды
+        this.notificationTimer = setTimeout(() => {
+            notification.classList.remove('visible');
+        }, 2000);
+    }
+
     handleConnectionClick(e) {
         console.log('=== CONNECTION CLICK ===', 'target:', e.target.tagName, 'classList:', Array.from(e.target.classList), 'pointerType:', e.pointerType);
         
@@ -1393,34 +2306,302 @@ class FlowEditor {
         }
     }
 
+    // ==========================================================================
+    // Контекстное меню для узлов (ПКМ)
+    // ==========================================================================
+
+    handleNodeContextMenu(e) {
+        console.log('=== NODE CONTEXT MENU ===', 'target:', e.target.tagName);
+
+        // Проверяем, что клик был на узле
+        const nodeEl = e.target.closest('.node');
+        if (!nodeEl) {
+            // Если клик не на узле, закрываем контекстное меню
+            const menu = document.getElementById('nodeContextMenu');
+            if (menu) {
+                menu.style.display = 'none';
+                menu.classList.remove('visible');
+            }
+            return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const nodeId = nodeEl.dataset.id;
+        console.log('=== NODE CONTEXT MENU ===', 'nodeId:', nodeId);
+
+        // Выбираем узел
+        this.selectNode(nodeId);
+        this.contextMenuTargetNodeId = nodeId;
+
+        // Показываем контекстное меню
+        this.showNodeContextMenu(e.clientX, e.clientY);
+    }
+
+    showNodeContextMenu(x, y) {
+        console.log('=== SHOW NODE CONTEXT MENU ===', 'x:', x, 'y:', y);
+        const menu = document.getElementById('nodeContextMenu');
+        if (!menu) {
+            console.error('Node context menu element not found!');
+            return;
+        }
+
+        // Устанавливаем позицию меню
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+
+        // Показываем меню с анимацией
+        menu.style.display = 'block';
+        menu.classList.add('visible');
+
+        // Проверяем, не выходит ли меню за пределы экрана
+        const menuRect = menu.getBoundingClientRect();
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+
+        if (menuRect.right > screenWidth) {
+            menu.style.left = (x - menuRect.width) + 'px';
+        }
+        if (menuRect.bottom > screenHeight) {
+            menu.style.top = (y - menuRect.height) + 'px';
+        }
+
+        // Удаляем старые обработчики, если есть
+        const oldHandler = menu._closeMenuHandler;
+        if (oldHandler) {
+            document.removeEventListener('click', oldHandler);
+        }
+
+        // Закрытие меню при клике вне его
+        const closeMenu = (e) => {
+            if (!menu.contains(e.target)) {
+                menu.style.display = 'none';
+                menu.classList.remove('visible');
+                document.removeEventListener('click', closeMenu);
+                menu._closeMenuHandler = null;
+            }
+        };
+
+        // Сохраняем ссылку на обработчик
+        menu._closeMenuHandler = closeMenu;
+
+        // Добавляем обработчик с задержкой
+        setTimeout(() => {
+            document.addEventListener('click', closeMenu);
+        }, 100);
+    }
+
+    setupNodeContextMenuHandlers() {
+        const menu = document.getElementById('nodeContextMenu');
+        if (!menu) return;
+
+        // Добавляем обработчики для всех пунктов меню
+        const menuItems = menu.querySelectorAll('.menu-item');
+        menuItems.forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const action = item.getAttribute('data-action');
+                this.handleNodeContextMenuAction(action);
+
+                // Закрываем меню после клика
+                menu.style.display = 'none';
+                menu.classList.remove('visible');
+            });
+        });
+    }
+
+    handleNodeContextMenuAction(action) {
+        console.log('=== NODE CONTEXT MENU ACTION ===', 'action:', action, 'nodeId:', this.contextMenuTargetNodeId);
+
+        if (!this.contextMenuTargetNodeId) return;
+
+        const node = this.nodes.find(n => n.id === this.contextMenuTargetNodeId);
+        if (!node) return;
+
+        switch (action) {
+            case 'edit':
+                this.contextMenuActionEdit(node);
+                break;
+            case 'duplicate':
+                this.contextMenuActionDuplicate(node);
+                break;
+            case 'delete':
+                this.contextMenuActionDelete(node);
+                break;
+            case 'connect':
+                this.contextMenuActionConnect(node);
+                break;
+            case 'center':
+                this.contextMenuActionCenter(node);
+                break;
+            case 'focus':
+                this.contextMenuActionFocus(node);
+                break;
+        }
+    }
+
+    contextMenuActionEdit(node) {
+        console.log('=== CONTEXT MENU: EDIT ===', 'nodeId:', node.id);
+        // Открываем Markdown редактор для узлов типа message, menu, universal или start
+        if (node.type === 'message' || node.type === 'menu' || node.type === 'universal' || node.isStart) {
+            if (typeof openMarkdownEditor === 'function') {
+                openMarkdownEditor(node.id);
+            } else {
+                console.error('openMarkdownEditor function not available');
+            }
+        } else {
+            // Для других типов узлов просто открываем свойства
+            this.selectNode(node.id);
+        }
+    }
+
+    contextMenuActionDuplicate(node) {
+        console.log('=== CONTEXT MENU: DUPLICATE ===', 'nodeId:', node.id);
+
+        // Создаём копию узла со смещением
+        const newNode = JSON.parse(JSON.stringify(node));
+        newNode.id = `node_${this.nodeIdCounter++}`;
+        newNode.x = node.x + 50;
+        newNode.y = node.y + 50;
+
+        // Генерируем новые ID для кнопок
+        if (newNode.buttons) {
+            newNode.buttons.forEach((btn, index) => {
+                btn.id = `btn_${this.nodeIdCounter}_${index}`;
+                btn.nextNodeId = null;
+            });
+        }
+
+        this.nodes.push(newNode);
+        this.render();
+        this.selectNode(newNode.id);
+
+        // Вибрация для тактильной обратной связи
+        this.vibrateDouble();
+    }
+
+    contextMenuActionDelete(node) {
+        console.log('=== CONTEXT MENU: DELETE ===', 'nodeId:', node.id);
+        if (node.id !== 'start') {
+            this.deleteNode(node.id);
+
+            // Вибрация для тактильной обратной связи
+            this.vibrateHeavy();
+        }
+    }
+
+    contextMenuActionConnect(node) {
+        console.log('=== CONTEXT MENU: CONNECT ===', 'nodeId:', node.id);
+
+        // Проверяем, может ли узел быть источником соединения
+        if (node.type === 'api_request' || node.type === 'condition') {
+            // Для API и condition узлов просто показываем сообщение
+            console.log('Use specific connectors for API/Condition nodes');
+            return;
+        }
+
+        // Переключаемся в режим соединения
+        this.setMode('connect');
+
+        // Выбираем узел и показываем коннекторы
+        this.selectNode(node.id);
+        const nodeEl = document.querySelector(`.node[data-id="${node.id}"]`);
+        if (nodeEl) {
+            this.showConnectors(nodeEl);
+        }
+
+        // Вибрация для тактильной обратной связи
+        this.vibrateMedium();
+    }
+
+    contextMenuActionCenter(node) {
+        console.log('=== CONTEXT MENU: CENTER ===', 'nodeId:', node.id);
+
+        // Центрируем узел на канвасе
+        const canvas = this.canvas;
+        const canvasWidth = canvas.offsetWidth;
+        const canvasHeight = canvas.offsetHeight;
+
+        const nodeWidth = node.width || 250;
+        const nodeHeight = node.height || 150;
+
+        // Вычисляем новые координаты для центрирования
+        node.x = (canvasWidth / this.scale - nodeWidth) / 2 - this.offset.x / this.scale;
+        node.y = (canvasHeight / this.scale - nodeHeight) / 2 - this.offset.y / this.scale;
+
+        this.render();
+
+        // Вибрация для тактильной обратной связи
+        this.vibrateMedium();
+    }
+
+    contextMenuActionFocus(node) {
+        console.log('=== CONTEXT MENU: FOCUS ===', 'nodeId:', node.id);
+
+        // Центрируем вид на узле
+        const canvas = this.canvas;
+        const canvasWidth = canvas.offsetWidth;
+        const canvasHeight = canvas.offsetHeight;
+
+        const nodeWidth = node.width || 250;
+        const nodeHeight = node.height || 150;
+
+        // Вычисляем offset для центрирования узла
+        this.offset.x = (canvasWidth - nodeWidth * this.scale) / 2 - node.x * this.scale;
+        this.offset.y = (canvasHeight - nodeHeight * this.scale) / 2 - node.y * this.scale;
+
+        // Выбираем узел
+        this.selectNode(node.id);
+        this.render();
+
+        // Вибрация для тактильной обратной связи
+        this.vibrateMedium();
+    }
+
     setMode(mode) {
         this.mode = mode;
-        document.getElementById('modeEdit').classList.toggle('active', mode === 'edit');
-        document.getElementById('modeConnect').classList.toggle('active', mode === 'connect');
+        
+        // Обновляем активный класс для mode-btn
+        const modeButtons = document.querySelectorAll('.mode-btn');
+        modeButtons.forEach(btn => {
+            const btnMode = btn.getAttribute('data-mode');
+            if (btnMode === mode) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
 
+        // Обновляем курсор в зависимости от режима
         if (mode === 'connect') {
             this.canvas.style.cursor = 'crosshair';
+        } else if (mode === 'view') {
+            this.canvas.style.cursor = 'default';
         } else {
             this.canvas.style.cursor = 'grab';
         }
 
+        // Обновляем отображение коннекторов
         this.render();
     }
     selectNode(nodeId) {
         console.log('=== SELECT NODE START ===', 'nodeId:', nodeId, 'selectedConnection was:', this.selectedConnection);
         console.log('=== SELECT NODE ===', 'nodeProperties exists:', !!this.nodeProperties);
-        
+
         this.selectedNode = nodeId;
         this.selectedConnection = null; // Снимаем выделение со связи при выборе узла
         const node = this.nodes.find(n => n.id === nodeId);
-        
+
         console.log('Node found:', node ? node.id : 'null', 'type:', node ? node.type : 'null');
         console.log('About to call showNodeProperties...');
-        
+
         this.showNodeProperties(node);
+        this.openPropertiesSheet(node); // Открываем properties sheet на мобильных
         this.updateDeleteConnectionButton();
         this.updateNodeSelection(); // Обновляем только выделение узлов
-        
+
         console.log('=== NODE SELECTED END ===', 'selectedNode:', this.selectedNode, 'selectedConnection:', this.selectedConnection);
     }
     

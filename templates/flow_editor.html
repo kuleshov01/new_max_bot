@@ -4,53 +4,162 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Редактор диалоговых потоков</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/variables.css') }}?v=1">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/flow.css') }}?v=14">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/animations.css') }}?v=1">
 </head>
 <body>
-    <div id="app">
-        <div class="sidebar">
-            <h3>Редактор ботов</h3>
-
-            <div class="sidebar-section">
-                <h4>Пользовательские команды</h4>
-                <div id="commandsList">
-                    <p class="text-muted">Загрузка команд...</p>
-                </div>
-                <button class="btn btn-add" onclick="window.showCreateCommandModal()">+ Новая команда</button>
-            </div>
-            
-            <div class="sidebar-section">
-                <h4>Инструменты</h4>
-                <button class="btn btn-add" onclick="window.addElement()">+ Сообщение</button>
-                <button class="btn btn-add" onclick="window.addApiNode()">🌐 API Запрос</button>
-                <button class="btn btn-add" onclick="window.addConditionNode()">🔀 Условие</button>
-                <button class="btn btn-add" onclick="window.addTransformNode()">⚙️ Обработка данных</button>
-                <button class="btn btn-action" onclick="window.saveFlow()">💾 Сохранить</button>
-                <button class="btn btn-action" onclick="window.exportFlow()">📤 Экспорт</button>
-                <button class="btn btn-action" onclick="window.importFlow()">📥 Импорт</button>
-            </div>
-
-            <div class="sidebar-section">
-                <h4>Режим работы</h4>
-                <button class="btn btn-mode active" id="modeEdit" onclick="setMode('edit')">✏️ Редактирование</button>
-                <button class="btn btn-mode" id="modeConnect" onclick="setMode('connect')">🔗 Рисование связей</button>
-                <button class="btn btn-action" id="btnDeleteConnection" onclick="deleteSelectedConnection()" style="display: none; margin-top: 10px;">🗑️ Удалить выделенную связь</button>
-                <div class="help-box" style="margin-top: 10px;">
-                    <div class="help-box-title">Удаление связей:</div>
-                    <div>• Кликните на связь для выделения</div>
-                    <div>• Нажмите <b>Delete</b> или кнопку выше</div>
-                    <div>• Или нажмите <b>×</b> на связи</div>
-                    <div>• Или правый клик на связь</div>
-                </div>
-            </div>
-            
-            <div class="sidebar-section">
-                <h4>Свойства узла</h4>
-                <div id="nodeProperties">
-                    <p>Выберите узел для редактирования</p>
-                </div>
-            </div>
+    <!-- Skip Links для доступности -->
+    <a href="#main-content" class="skip-link">Перейти к основному содержимому</a>
+    <a href="#nodes" class="skip-link">Перейти к узлам</a>
+    
+    <!-- Top Bar (Mobile & Desktop) -->
+    <header class="top-bar desktop-header">
+        <!-- Header Left (Mobile & Desktop) -->
+        <div class="header-left">
+            <button class="menu-btn" aria-label="Меню">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+            </button>
+            <span class="app-name">MaxBot Editor</span>
         </div>
+        
+        <!-- Header Center (Desktop Only) -->
+        <div class="header-center">
+            <select class="bot-select" id="botSelect">
+                <option value="">Bot: Выберите бота</option>
+                <!-- Options will be populated dynamically -->
+            </select>
+            <select class="command-select" id="commandSelect">
+                <option value="">Команда: Все</option>
+                <!-- Options will be populated dynamically -->
+            </select>
+        </div>
+        
+        <!-- Header Right (Desktop Only) -->
+        <div class="header-right">
+            <button class="action-btn" onclick="window.saveFlow()" aria-label="Сохранить">
+                💾 Сохранить
+            </button>
+            <button class="action-btn" onclick="window.exportFlow()" aria-label="Экспорт">
+                📤 Экспорт
+            </button>
+            <button class="action-btn" onclick="window.importFlow()" aria-label="Импорт">
+                📥 Импорт
+            </button>
+            <button class="icon-btn" aria-label="Настройки">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+            </button>
+            <button class="icon-btn" onclick="window.location.href='/'; return false;" aria-label="Назад">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M19 12H5M12 19l-7-7 7-7"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Bottom Toolbar (Mobile Only) -->
+    <nav class="bottom-toolbar">
+        <div class="tools-container">
+            <button class="tool-btn" data-tool="message" aria-label="Добавить сообщение">
+                <span class="tool-icon">📝</span>
+            </button>
+            <button class="tool-btn" data-tool="api" aria-label="API запрос">
+                <span class="tool-icon">🌐</span>
+            </button>
+            <button class="tool-btn" data-tool="condition" aria-label="Условие">
+                <span class="tool-icon">🔀</span>
+            </button>
+            <button class="tool-btn" data-tool="transform" aria-label="Трансформация">
+                <span class="tool-icon">⚙️</span>
+            </button>
+        </div>
+        <div class="view-controls">
+            <button class="icon-btn" id="reset-zoom" aria-label="Сбросить масштаб">
+                ↺
+            </button>
+            <button class="icon-btn" id="zoom-info" aria-label="Масштаб">
+                🔍 <span>100%</span>
+            </button>
+        </div>
+    </nav>
+
+    <div id="app" class="canvas-container" role="main" tabindex="-1">
+        <aside class="left-sidebar" aria-label="Боковая панель" role="complementary">
+            <!-- Section 1: Команды бота -->
+            <section class="sidebar-section" aria-labelledby="commands-heading">
+                <h2 id="commands-heading" class="sr-only">Команды бота</h2>
+                <button class="section-header" data-section="commands" aria-expanded="true" aria-controls="commands-section">
+                    <span>▼ Команды бота</span>
+                </button>
+                <div class="section-content open" id="commands-section" role="region" aria-labelledby="commands-heading">
+                    <div class="command-list" id="commandsList">
+                        <p class="text-muted">Загрузка команд...</p>
+                    </div>
+                    <button class="add-btn" onclick="window.showCreateCommandModal()" aria-label="Добавить новую команду">+ Добавить команду</button>
+                </div>
+            </section>
+            
+            <!-- Section 2: Инструменты -->
+            <section class="sidebar-section" aria-labelledby="tools-heading">
+                <h2 id="tools-heading" class="sr-only">Инструменты</h2>
+                <button class="section-header" data-section="tools" aria-expanded="true" aria-controls="tools-section">
+                    <span>▼ Инструменты</span>
+                </button>
+                <div class="section-content open" id="tools-section" role="region" aria-labelledby="tools-heading">
+                    <div class="tool-list">
+                        <div class="tool-item" draggable="true" data-tool="message">
+                            <span class="tool-icon">📝</span>
+                            <div class="tool-info">
+                                <span class="tool-name">Сообщение</span>
+                                <span class="tool-desc">Быстрое добавление текстового сообщения</span>
+                            </div>
+                        </div>
+                        <div class="tool-item" draggable="true" data-tool="api">
+                            <span class="tool-icon">🌐</span>
+                            <div class="tool-info">
+                                <span class="tool-name">API запрос</span>
+                                <span class="tool-desc">Выполнение HTTP запроса к внешнему API</span>
+                            </div>
+                        </div>
+                        <div class="tool-item" draggable="true" data-tool="condition">
+                            <span class="tool-icon">🔀</span>
+                            <div class="tool-info">
+                                <span class="tool-name">Условие</span>
+                                <span class="tool-desc">Разветвление логики по условию</span>
+                            </div>
+                        </div>
+                        <div class="tool-item" draggable="true" data-tool="transform">
+                            <span class="tool-icon">⚙️</span>
+                            <div class="tool-info">
+                                <span class="tool-name">Трансформация</span>
+                                <span class="tool-desc">Обработка и преобразование данных</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Section 3: Свойства узла -->
+            <section class="sidebar-section" aria-labelledby="properties-heading">
+                <h2 id="properties-heading" class="sr-only">Свойства узла</h2>
+                <button class="section-header" data-section="properties" aria-expanded="true" aria-controls="properties-section">
+                    <span>▼ Свойства узла</span>
+                </button>
+                <div class="section-content open" id="properties-section" role="region" aria-labelledby="properties-heading">
+                    <div id="nodeProperties" role="region" aria-live="polite" aria-atomic="true">
+                        <p class="text-muted">Выберите узел для редактирования</p>
+                    </div>
+                </div>
+            </section>
+        </aside>
         
         <div class="main-content">
             <div id="flowCanvas">
@@ -65,14 +174,27 @@
                 <button class="zoom-btn" onclick="zoomReset()" title="Сбросить">↺</button>
             </div>
         </div>
+        
+        <!-- Mode Toggle (Desktop Only) -->
+        <div class="mode-toggle">
+            <button class="mode-btn active" data-mode="edit" onclick="setMode('edit')" aria-label="Режим редактирования">
+                ✏️ Редактирование
+            </button>
+            <button class="mode-btn" data-mode="connect" onclick="setMode('connect')" aria-label="Режим соединения">
+                🔗 Соединение
+            </button>
+            <button class="mode-btn" data-mode="view" onclick="setMode('view')" aria-label="Режим просмотра">
+                👁️ Просмотр
+            </button>
+        </div>
     </div>
     
     <!-- Модальное окно Markdown редактора -->
-    <div id="markdownEditorModal" class="modal">
+    <div id="markdownEditorModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="markdown-editor-title">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>📝 Редактор Markdown</h3>
-                <button class="modal-close" onclick="closeMarkdownEditor()">&times;</button>
+                <h3 id="markdown-editor-title">📝 Редактор Markdown</h3>
+                <button class="modal-close" onclick="closeMarkdownEditor()" aria-label="Закрыть редактор">&times;</button>
             </div>
             <div class="modal-body">
                 <!-- Панель инструментов Markdown -->
@@ -131,12 +253,35 @@
         <div class="context-menu-item" onclick="addControlPoint()">➕ Добавить опорную точку</div>
     </div>
 
+    <!-- Контекстное меню для узлов -->
+    <div id="nodeContextMenu" class="context-menu" style="display: none;">
+        <button class="menu-item" data-action="edit">
+            ✏️ Изменить
+        </button>
+        <button class="menu-item" data-action="duplicate">
+            📋 Дублировать
+        </button>
+        <button class="menu-item" data-action="delete">
+            🗑️ Удалить
+        </button>
+        <div class="menu-divider"></div>
+        <button class="menu-item" data-action="connect">
+            🔗 Соединить с...
+        </button>
+        <button class="menu-item" data-action="center">
+            📐 Центрировать
+        </button>
+        <button class="menu-item" data-action="focus">
+            🔍 Фокус на узле
+        </button>
+    </div>
+
     <!-- Модальное окно для создания/редактирования команды -->
-    <div id="commandModal" class="modal">
+    <div id="commandModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="command-modal-title">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 id="commandModalTitle">📝 Новая команда</h3>
-                <button class="modal-close" onclick="closeCommandModal()">&times;</button>
+                <h3 id="command-modal-title">📝 Новая команда</h3>
+                <button class="modal-close" onclick="closeCommandModal()" aria-label="Закрыть окно команды">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="property-group">
@@ -162,12 +307,40 @@
         </div>
     </div>
 
+    <!-- Left Bottom Sheet (Commands) -->
+    <div class="bottom-sheet" id="commands-sheet">
+        <div class="sheet-header">
+            <h2>Команды бота</h2>
+            <button class="close-btn" aria-label="Закрыть">×</button>
+        </div>
+        <div class="sheet-content">
+            <div class="command-list">
+                <!-- Команды будут добавляться динамически -->
+            </div>
+            <button class="add-command-btn">+ Добавить команду</button>
+        </div>
+    </div>
+
+    <!-- Right Bottom Sheet (Node Properties) -->
+    <div class="bottom-sheet" id="properties-sheet">
+        <div class="sheet-header">
+            <h2>Свойства: <span class="node-type">Сообщение</span></h2>
+            <button class="close-btn" aria-label="Закрыть">×</button>
+        </div>
+        <div class="sheet-content">
+            <form id="node-properties-form">
+                <!-- Поля формы будут добавляться динамически -->
+            </form>
+            <button type="submit" class="apply-btn">✓ Применить</button>
+        </div>
+    </div>
+
     <script>
         // Set the base URL for API calls
         window.API_BASE_URL = '{{ base_url }}';
         // Set the bot ID from URL parameter
         window.BOT_ID = {{ bot_id }};
     </script>
-    <script src="{{ url_for('static', filename='js/flow.js') }}?v=25"></script>
+    <script src="{{ url_for('static', filename='js/flow.js') }}?v=27"></script>
 </body>
 </html>
